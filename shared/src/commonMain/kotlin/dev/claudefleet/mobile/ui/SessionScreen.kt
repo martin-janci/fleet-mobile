@@ -964,7 +964,7 @@ fun SessionScreen(
                     draft = liveDraft,
                     values = draftAnswers,
                     onChange = { name, v -> draftAnswers = if (v == null) draftAnswers - name else draftAnswers + (name to v) },
-                    canAnswer = chatForms != null && !state.readOnly && state.connected,
+                    canAnswer = chatForms != null && state.mayPressKeys && state.connected,
                     modifier = Modifier.heightIn(max = cardMax),
                 )
             }
@@ -974,7 +974,7 @@ fun SessionScreen(
                     pending = formShown,
                     sessionName = state.session?.displayName ?: "The session",
                     actions = chatForms,
-                    canAnswer = !state.readOnly && state.connected,
+                    canAnswer = state.mayPressKeys && state.connected,
                     open = state.session?.pendingForm != null,
                     onDismiss = { closedForm = null },
                     modifier = Modifier.heightIn(max = cardMax),

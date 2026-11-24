@@ -240,6 +240,47 @@ class AppSessionTest {
     }
 
     /**
+     * Review w18-8: the echo is the hub's configured public address, which
+     * this phone may not reach from where it is (a tailnet name, typed over
+     * the LAN). Asked once; one that does not answer loses to the address
+     * that just worked, and no credential goes to it.
+     */
+    @Test
+    fun an_echo_this_phone_cannot_reach_loses_to_the_base_that_worked() = runTest {
+        val calls = Calls()
+        val (app, _, secrets) = session(calls = calls) { request ->
+            if (request.url.host == "hub.tailnet.example") throw RuntimeException("no route to host")
+            pairOk(hub = "https://hub.tailnet.example") to HttpStatusCode.OK
+        }
+
+        app.pair("http://192.168.1.20:8899/pair#$CODE")
+
+        assertEquals("http://192.168.1.20:8899", secrets.read()?.hub)
+        assertEquals(listOf("/pair", "/healthz"), calls.requests.map { it.url.encodedPath })
+        assertNull(calls.auth(1), "the probe carries no credential")
+    }
+
+    /** Review w18-2: the mode the hub's tool list shows replaces the one stored at pairing. */
+    @Test
+    fun a_mode_the_hub_changed_since_pairing_is_kept() = runTest {
+        val held = Credentials(BASE, "tok-secret-value", "phone", "readonly")
+        val secrets = FakeSecrets(held)
+        val (app, _, _) = session(secrets) { pairOk() to HttpStatusCode.OK }
+        app.restore()
+
+        app.modeListed("full", held = Credentials(BASE, "another-token", "phone", "readonly"))
+        assertEquals("readonly", secrets.read()?.mode, "a list read with another credential says nothing about this one")
+
+        app.modeListed("full", held = held)
+        assertEquals("full", secrets.read()?.mode)
+        assertEquals("full", app.credentials()?.mode)
+        assertEquals("tok-secret-value", app.credentials()?.token)
+        val writes = secrets.writes
+        app.modeListed("full", held = held)
+        assertEquals(writes, secrets.writes, "the same mode is not written again")
+    }
+
+    /**
      * ...except when the hub has no public URL configured, in which case it
      * echoes its own loopback base. That address means "this machine" on the
      * phone and would be unreachable, so the base the phone actually reached

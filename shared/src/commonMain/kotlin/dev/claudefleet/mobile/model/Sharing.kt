@@ -82,6 +82,31 @@ data class MyAccess(
         return grants[row.id]
     }
 
+    /**
+     * [row] belongs to someone else and nothing above Watch shares it with
+     * this person: seen through team reach (an org whose members see each
+     * other's sessions), or shared at Watch. Its questions are its owner's;
+     * the hub refuses this person's answer (review w11-1).
+     */
+    fun othersToAnswer(row: SessionRow?): Boolean {
+        if (row == null || personId == null) return false
+        val owner = row.ownerPersonId ?: return false
+        if (owner == personId) return false
+        val level = grants[row.id]
+        return level == null || level == GrantLevel.WATCH
+    }
+
+    /**
+     * Whether [row] waits on this person: their own, an unclaimed one, one
+     * shared at Answer or Steer, or any row while the hub has not said who
+     * this device is. What the Inbox counts and the notifier announces
+     * (reviews w08-3, w11-1).
+     */
+    fun waitsOnMe(row: SessionRow?): Boolean = !othersToAnswer(row) && levelFor(row) != GrantLevel.WATCH
+
+    /** [row] is this person's own, or nobody's: nothing shared it and no one else owns it. */
+    fun mineOrUnclaimed(row: SessionRow?): Boolean = levelFor(row) == null && !othersToAnswer(row)
+
     /** This person owns [row]: the share sheet is theirs to open. */
     fun owns(row: SessionRow?): Boolean =
         row != null && personId != null && row.ownerPersonId != null && row.ownerPersonId == personId

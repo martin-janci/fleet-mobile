@@ -93,6 +93,10 @@ private class FakeHub(
     var usageCalls = 0
         private set
 
+    var settingsJson: String = "{}"
+    var settingsCalls = 0
+        private set
+
     /** Makes `account_usage` and `list_accounts` answer 502. */
     var failAccounts = false
 
@@ -129,6 +133,7 @@ private class FakeHub(
                     "\"account_usage\"" in body -> { usageCalls += 1; usageJson }
                     "\"list_accounts\"" in body -> { accountsCalls += 1; accountsJson }
                     "\"tickets\"" in body -> { mineCalls += 1; mineJson }
+                    "get_settings" in body -> { settingsCalls += 1; settingsJson }
                     "list_sessions" in body -> {
                         sessionCalls += 1
                         val rows = sessionsJson
@@ -1662,6 +1667,131 @@ class FleetRepositoryTest {
 
         assertEquals(100.0, repository.accountUsage.value["u1"]?.usage?.sevenDay?.utilization)
         assertEquals("Home", repository.accountNames.value["u1"])
+        repository.stop()
+    }
+
+    /**
+     * Review w18-5: a Retry tap (or the network coming back) while a connect
+     * attempt is still in flight is a real request. It used to be drained
+     * when that attempt failed, and the full backoff followed.
+     */
+    @Test
+    fun a_wake_sent_while_an_attempt_is_in_flight_ends_the_next_wait() = runTest {
+        val hub = FakeHub()
+        val stream = FakeStream {
+            delay(5_000)
+            throw HubError.Transport(RuntimeException("down"))
+        }
+        stream.clock = this
+        val repository = repo(hub, stream, backgroundScope)
+        repository.start()
+        testScheduler.advanceTimeBy(100)
+        repository.reconnectNow()
+        testScheduler.advanceTimeBy(4_950)
+        assertEquals(listOf(0L, 5_000L), stream.openedAt, "the attempt after the failed one goes at once")
+        repository.stop()
+    }
+
+    /**
+     * Review w18-4: a `lagged` reconnect leaves `status` Connected, so the
+     * work screens see no transition; the hole is where `work:*`,
+     * `confirm:changed` and `handoff:changed` frames were lost.
+     */
+    @Test
+    fun a_lagged_reconnect_tells_the_work_screens_to_read_again() = runTest {
+        val hub = FakeHub(sessionsJson = sessionRows(1))
+        val refetched = CompletableDeferred<Unit>()
+        val stream = FakeStream { attempt ->
+            emit(READY)
+            if (attempt >= 2) {
+                refetched.complete(Unit)
+                awaitCancellation()
+            }
+            emit(HubEvent.Lagged(17))
+        }
+        val repository = repo(hub, stream, backgroundScope)
+        var work = 0
+        var confirms = 0
+        var handoffs = 0
+        backgroundScope.launch { repository.workChanges.collect { work += 1 } }
+        backgroundScope.launch { repository.confirmChanges.collect { confirms += 1 } }
+        backgroundScope.launch { repository.handoffChanges.collect { handoffs += 1 } }
+        runCurrent()
+
+        repository.start()
+        refetched.await()
+        runCurrent()
+
+        assertEquals(listOf(1, 1, 1), listOf(work, confirms, handoffs), "once, for the reconnect after the lag; the first ready has its status transition")
+        repository.stop()
+    }
+
+    /**
+     * Reviews w11-4, w13-1: the hub's settings are read on connect and again
+     * on `settings:changed`, by the repository itself, so the watcher follows
+     * a change made on another device with no screen composed.
+     */
+    @Test
+    fun the_hubs_settings_are_read_on_connect_and_on_a_settings_frame() = runTest {
+        val hub = FakeHub().apply {
+            toolsJson = """[{"name":"get_settings"},{"name":"list_sessions"}]"""
+            settingsJson = """{"notify.phone":"needs_you","notify.quiet_hours":""}"""
+        }
+        val first = CompletableDeferred<Map<String, String>>()
+        val second = CompletableDeferred<Map<String, String>>()
+        val changed = CompletableDeferred<Unit>()
+        val stream = FakeStream {
+            emit(READY)
+            changed.await()
+            emit(HubEvent.Row("settings:changed", Json.parseToJsonElement("""{"key":"notify.quiet_hours"}""")))
+            awaitCancellation()
+        }
+        val repository = FleetRepository(
+            hub.client,
+            stream,
+            backgroundScope,
+            onFleetSettings = { if (!first.isCompleted) first.complete(it) else second.complete(it) },
+        )
+        repository.start()
+        assertEquals("", first.await()["notify.quiet_hours"])
+
+        hub.settingsJson = """{"notify.phone":"needs_you","notify.quiet_hours":"22:00-07:00"}"""
+        changed.complete(Unit)
+        assertEquals("22:00-07:00", second.await()["notify.quiet_hours"])
+        repository.stop()
+    }
+
+    /** Review w18-2: what a `tools/list` shows of the device's mode. */
+    @Test
+    fun the_listed_tools_name_the_device_mode() {
+        assertEquals("full", listedMode(setOf("list_sessions", "send_prompt", "new_session")))
+        assertEquals("full", listedMode(setOf("list_sessions", "send_prompt", "queue_prompt")))
+        assertEquals("answer", listedMode(setOf("list_sessions", "send_prompt", "ask")))
+        assertEquals("readonly", listedMode(setOf("list_sessions")))
+        assertNull(listedMode(emptySet()), "an empty list says nothing")
+    }
+
+    /** Review w18-2: an operator changed the mode since pairing; the connection's tool list says so. */
+    @Test
+    fun a_connection_reports_the_mode_its_tool_list_shows() = runTest {
+        val hub = FakeHub().apply { toolsJson = """[{"name":"list_sessions"},{"name":"send_prompt"},{"name":"ask"}]""" }
+        val mode = CompletableDeferred<String>()
+        val old = CompletableDeferred<String>()
+        val stream = FakeStream { attempt ->
+            // An older hub's contract says nothing about how it lists; then the current one.
+            emit(if (attempt == 1) READY else HubEvent.Ready("0.9.3", listOf("session", "host"), contract = MODE_LISTED_CONTRACT))
+            if (attempt == 1) {
+                while (hub.toolListCalls == 0) delay(10)
+                delay(50)
+                throw HubError.Transport(RuntimeException("drop"))
+            }
+            awaitCancellation()
+        }
+        var calls = 0
+        val repository = FleetRepository(hub.client, stream, backgroundScope, onMode = { calls += 1; (if (calls == 1) mode else old).complete(it) })
+        repository.start()
+        assertEquals("answer", mode.await())
+        assertEquals(1, calls, "a hub that names no contract is left with the mode pairing stored")
         repository.stop()
     }
 }

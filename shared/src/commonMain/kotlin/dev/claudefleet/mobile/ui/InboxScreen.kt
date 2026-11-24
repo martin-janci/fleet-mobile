@@ -74,7 +74,7 @@ import dev.claudefleet.mobile.ui.kit.PhoneRow
  * id so the list does not reshuffle on every event frame.
  */
 fun inboxRows(sessions: List<SessionRow>, access: MyAccess = MyAccess.UNKNOWN): List<SessionRow> =
-    sessions.filter { it.needsAttention && answersHere(access.levelFor(it)) }
+    sessions.filter { it.needsAttention && access.waitsOnMe(it) }
         .sortedWith(compareBy<SessionRow, Long?>(nullsLast()) { it.askedAt }.thenBy { it.id })
 
 /**
@@ -89,7 +89,7 @@ fun proposedRows(
     /** Readings set aside with Not waiting on this phone ([proposalKey]), left out (G5.4). */
     setAside: Set<String> = emptySet(),
 ): List<SessionRow> =
-    sessions.filter { it.isProposed && access.levelFor(it) == null && proposalKey(it) !in setAside }
+    sessions.filter { it.isProposed && access.mineOrUnclaimed(it) && proposalKey(it) !in setAside }
         .sortedWith(compareBy<SessionRow, Long?>(nullsLast()) { it.askedAt }.thenBy { it.id })
 
 /**
@@ -183,7 +183,7 @@ internal fun inboxSubtitle(needYou: Int, running: Int, proposed: Int = 0, paused
  */
 fun pausedRows(sessions: List<SessionRow>, access: MyAccess = MyAccess.UNKNOWN): List<SessionRow> =
     sessions.filter {
-        (it.attention?.state == "paused" || it.attentionReason == "lifecycle") && access.levelFor(it) == null
+        (it.attention?.state == "paused" || it.attentionReason == "lifecycle") && access.mineOrUnclaimed(it)
     }
 
 /**

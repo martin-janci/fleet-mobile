@@ -136,8 +136,15 @@ class AppSession(
             ?: throw NotAPairingCode(NotAPairingCode.NO_HUB)
 
         val result = HubClient(http, reached).pair(target.code)
+        // The hub's echo is its configured public address, which this phone
+        // may not be able to reach from where it is (a tailnet name, typed
+        // over the LAN). Asked once before it replaces the address that just
+        // worked; storing one that does not answer loses the hub, and pairing
+        // again only repeats it (review w18-8).
+        val echoed = preferredBase(echoed = result.hub, reached = reached)
+        val kept = if (echoed == reached || HubClient(http, echoed).reachable()) echoed else reached
         val credentials = Credentials(
-            hub = preferredBase(echoed = result.hub, reached = reached),
+            hub = kept,
             token = result.token,
             name = result.name,
             mode = result.mode,
@@ -165,6 +172,21 @@ class AppSession(
         }
         _state.value = AuthState.Paired(credentials)
         return credentials
+    }
+
+    /**
+     * The hub now lists this device's tools as [mode] would see them: an
+     * operator changed it since pairing (`set_device_mode`), and nothing else
+     * tells the phone (review w18-2). Kept only while [held], the credential
+     * that list was read with, is still the stored one. A store that will not
+     * write leaves the old mode in memory too: the two never disagree.
+     */
+    suspend fun modeListed(mode: String, held: Credentials) {
+        val now = credentials() ?: return
+        if (now.token != held.token || now.hub != held.hub || now.mode == mode) return
+        val next = Credentials(hub = now.hub, token = now.token, name = now.name, mode = mode)
+        secrets.write(next)
+        if (credentials()?.token == now.token) _state.value = AuthState.Paired(next)
     }
 
     /**

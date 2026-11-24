@@ -111,8 +111,8 @@ data class SessionUiState(
     val share: String? = null,
     /**
      * A dialog's keys (an option's digit, Enter, Escape) may be pressed: the
-     * credential may write and the session is not shared at watch. Wider
-     * than ![readOnly] by exactly an Answer share.
+     * credential may answer and the session is not shared at watch. Wider
+     * than ![readOnly] by an Answer share and by an answer-only device.
      */
     val mayPressKeys: Boolean = true,
     /**
@@ -589,6 +589,13 @@ class SessionViewModel(
      * (review w17-1). Null runs the calls in [scope], as a bare view model does.
      */
     private val callScope: CoroutineScope? = null,
+    /**
+     * The credential may answer a dialog (a key through `send_prompt`): a
+     * `full` one, or the hub's "answer only" mode, which sends no prompt
+     * (review w18-1). Defaults to [canSendPrompts], the two modes older
+     * callers know.
+     */
+    canPressKeys: Boolean = canSendPrompts,
 ) {
     /**
      * On this screen a missing thing is the session: `E_NOTFOUND` reads "This
@@ -702,6 +709,7 @@ class SessionViewModel(
         ),
     )
     private val tokenReadOnly = !canSendPrompts
+    private val tokenMayAnswer = canPressKeys || canSendPrompts
 
     /**
      * No prompt from this screen: the credential's `readonly`, or a share
@@ -714,7 +722,7 @@ class SessionViewModel(
     private fun readOnlyFor(share: String?): Boolean =
         tokenReadOnly || share == GrantLevel.WATCH || share == GrantLevel.ANSWER
 
-    private fun mayPressKeysFor(share: String?): Boolean = !tokenReadOnly && share != GrantLevel.WATCH
+    private fun mayPressKeysFor(share: String?): Boolean = tokenMayAnswer && share != GrantLevel.WATCH
 
     /** The level this session is shared with this person at, or null when it is theirs or nothing is known. */
     private fun shareNow(): String? = fleet.access.value.levelFor(row())
@@ -1277,7 +1285,16 @@ class SessionViewModel(
      */
     private suspend fun awaitAnswerLanded(asked: SessionRow?, turnBefore: Long): Boolean = coroutineScope {
         val turn = async {
-            actions.waitForTurn(sessionId, turnBefore, timeoutS = ANSWER_WAIT_SECONDS).status == WAIT_SATISFIED
+            // The key is already in: a long poll that fails (a lift, Wi-Fi to
+            // cellular) is not a failed answer. The row decides, and a
+            // timeout falls through to the pane re-check (review w18-3).
+            try {
+                actions.waitForTurn(sessionId, turnBefore, timeoutS = ANSWER_WAIT_SECONDS).status == WAIT_SATISFIED
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Throwable) {
+                false
+            }
         }
         val moved = async {
             withTimeoutOrNull(ANSWER_WAIT_SECONDS.seconds) {
@@ -1398,15 +1415,31 @@ class SessionViewModel(
      * the turn ends: out of the box at once, back in it if the hub refuses.
      * A turn that ended meanwhile is typed now ([QueuePromptResult.delivered]).
      */
+    /** A queued prompt whose outcome is unknown (its words, its `client_msg_id`), for the next send of the same words. */
+    private var queueUnknown: Pair<String, String>? = null
+
     private suspend fun queueDraft(text: String) {
         val body = text.trim()
         local.update { it.copy(sending = true, error = null, pending = body, draft = "") }
+        // One id per prompt, kept while its outcome is unknown: the same
+        // words sent again go under it, and the hub answers what the first
+        // call did rather than typing them twice (review w09-3). Only to a
+        // hub whose `queue_prompt` takes one; an older hub is read back.
+        val sendId = if (fleet.capabilities.value.accepts(HubCapabilities.QUEUE_PROMPT, "client_msg_id")) {
+            queueUnknown?.takeIf { it.first == body }?.second ?: newPromptSendId(clock())
+        } else {
+            null
+        }
         try {
-            val r = outliving({ actions.queuePrompt(sessionId, body, SendLaterTiming()) }) { t ->
+            val r = outliving({
+                if (sendId != null) actions.queuePrompt(sessionId, body, SendLaterTiming(), sendId)
+                else actions.queuePrompt(sessionId, body, SendLaterTiming())
+            }) { t ->
                 // Gone: back in the box the return finds, unless it holds
                 // something else or the hub may have kept it (review w17-3).
                 if (!scope.isActive && !mayHaveRun(t) && drafts.recall(sessionId).isEmpty()) drafts.keep(sessionId, text)
             }
+            queueUnknown = null
             quickReplies.remember(body)
             val queued = orNullUnlessCancelled { actions.queuedPrompts(sessionId) }
             local.update { it.copy(sending = false, pending = null, queued = queued?.filter { q -> q.waiting } ?: it.queued) }
@@ -1415,10 +1448,12 @@ class SessionViewModel(
             local.update { it.copy(sending = false, pending = null, draft = if (it.draft.isEmpty()) text else it.draft) }
             throw e
         } catch (t: Throwable) {
-            // `queue_prompt` keeps no `client_msg_id`: an answer lost after the
-            // hub stored the prompt is read back, and words it has are not put
-            // back in the box to be queued twice (review w17-3).
+            // An answer lost after the hub stored the prompt is read back, and
+            // words it has are not put back in the box to be queued twice
+            // (review w17-3). The read cannot see one the hub typed at once,
+            // so the id is kept for the same words sent again (review w09-3).
             val unknown = mayHaveRun(t)
+            queueUnknown = if (unknown && sendId != null) body to sendId else null
             val queued = if (unknown) orNullUnlessCancelled { actions.queuedPrompts(sessionId) }?.filter { q -> q.waiting } else null
             if (queued != null && queued.any { q -> withoutUntrustedMarker(q.body).trim() == body.trim() }) {
                 quickReplies.remember(body)

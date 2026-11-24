@@ -139,6 +139,7 @@ import io.ktor.client.network.sockets.SocketTimeoutException
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.HttpTimeoutConfig
 import io.ktor.client.plugins.timeout
+import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.prepareGet
@@ -379,6 +380,27 @@ class HubClient(
         (reply["error"] as? JsonObject)?.let { throw rpcError(it) }
         return reply["result"] as? JsonObject
             ?: throw HubError.Transport(IllegalStateException("the hub's reply had neither a result nor an error"))
+    }
+
+    /**
+     * Whether a hub answers at this base from where the phone is now: one
+     * `GET /healthz`, no credential, [timeoutMs] at most. Any answer below
+     * 500 is a yes (the question is the route to it, not its health); no
+     * answer, or a proxy's 5xx, is a no. For choosing between two addresses
+     * of one hub after pairing (review w18-8).
+     */
+    suspend fun reachable(timeoutMs: Long = 5_000): Boolean = try {
+        // The request's own deadline, as [send] sets one: the client's
+        // default waits far longer than a person finishing pairing should.
+        val response: HttpResponse = http.get("$base/healthz") {
+            timeout { requestTimeoutMillis = timeoutMs }
+            FleetClient.header?.let { header(CLIENT_HEADER, it) }
+        }
+        response.status.value < 500
+    } catch (e: CancellationException) {
+        throw e
+    } catch (_: Throwable) {
+        false
     }
 
     /**
@@ -668,9 +690,16 @@ class HubClient(
      * its turn ends — never into a dialog. The hub holds it, so it is sent
      * whether or not this phone is still running. [timing] holds it for
      * later (claude-fleet M15 G1.8); only what is set is sent, so a plain
-     * call is the one an older hub knows.
+     * call is the one an older hub knows. [clientMsgId] makes a retry safe
+     * (hub contract 18): sent again under the same id, the hub answers what
+     * the first call did instead of keeping or typing the prompt twice.
      */
-    suspend fun queuePrompt(sessionId: Long, prompt: String, timing: SendLaterTiming = SendLaterTiming()): QueuePromptResult =
+    suspend fun queuePrompt(
+        sessionId: Long,
+        prompt: String,
+        timing: SendLaterTiming = SendLaterTiming(),
+        clientMsgId: String? = null,
+    ): QueuePromptResult =
         call(
             "queue_prompt",
             buildJsonObject {
@@ -679,6 +708,7 @@ class HubClient(
                 timing.notBefore?.let { put("not_before", it) }
                 if (timing.untilLimitReset) put("until_limit_reset", true)
                 if (timing.skipIfArchived) put("skip_if_archived", true)
+                if (clientMsgId != null) put("client_msg_id", clientMsgId)
             },
         ) { json.decodeFromJsonElement(QueuePromptResult.serializer(), it) }
 
@@ -2017,7 +2047,7 @@ class HubClient(
             "debug_devices",
             buildJsonObject {
                 put("action", "boot")
-                put("device", deviceId.toString())
+                put("device", "#$deviceId")
             },
         ) { (it as? JsonObject)?.get("state")?.let { s -> (s as? JsonPrimitive)?.content } ?: "" }
 
@@ -2027,7 +2057,7 @@ class HubClient(
             "debug_devices",
             buildJsonObject {
                 put("action", "logs")
-                put("device", deviceId.toString())
+                put("device", "#$deviceId")
                 put("lines", lines)
             },
         ) { json.decodeFromJsonElement(DeviceOutput.serializer(), it) }
@@ -2043,7 +2073,7 @@ class HubClient(
             "debug_devices",
             buildJsonObject {
                 put("action", "screenshot")
-                put("device", deviceId.toString())
+                put("device", "#$deviceId")
             },
             whole = true,
         ) { screenshotOf(it) }
@@ -2057,7 +2087,7 @@ class HubClient(
             "debug_devices",
             buildJsonObject {
                 put("action", action)
-                put("device", deviceId.toString())
+                put("device", "#$deviceId")
                 more()
             },
         ) { json.decodeFromJsonElement(DebugDevice.serializer(), it) }

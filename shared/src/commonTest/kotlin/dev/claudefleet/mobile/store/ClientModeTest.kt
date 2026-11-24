@@ -43,6 +43,21 @@ class ClientModeTest {
     }
 
     /**
+     * Review w18-1: the hub's third mode, `answer` (`TokenMode::Answer`),
+     * answers a dialog or a form and sends no prompt. The phone used to file
+     * it under read-only, so the one thing the mode is for was refused here.
+     */
+    @Test
+    fun an_answer_only_device_answers_and_does_not_write() {
+        assertTrue(credential("answer").canAnswer)
+        assertFalse(credential("answer").canWrite)
+        assertTrue(credential("full").canAnswer)
+        for (mode in listOf("readonly", "Answer", "answer ", "", "observer")) {
+            assertFalse(Credentials.grantsAnswer(mode), "\"$mode\" answers nothing on the hub")
+        }
+    }
+
+    /**
      * Every other spelling is refused, including the ones that look like they
      * ought to work. Each of these was previously granted write.
      */

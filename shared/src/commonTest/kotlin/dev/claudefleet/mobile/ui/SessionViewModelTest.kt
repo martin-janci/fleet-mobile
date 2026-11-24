@@ -5291,6 +5291,96 @@ class SessionViewModelTest {
         assertEquals(listOf(Triple<String?, String, String?>(null, "fork", "fork-of-api-work")), actions.rewound)
         assertEquals(FORKED, opened)
     }
+
+    /**
+     * Review w18-1: an "answer only" device (the hub's `TokenMode::Answer`)
+     * presses a dialog's keys and types no prompt.
+     */
+    @Test
+    fun an_answer_only_device_presses_keys_and_sends_no_prompt() = runTest {
+        val actions = FakeActions()
+        val fleet = FakeFleetState(listOf(blockedRow()))
+        fleet.hubVersion.value = HUB_VERSION_KEYS
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope, canSendPrompts = false, canPressKeys = true)
+        vm.load().join()
+        vm.onDraftChange("ship it")
+        runCurrent()
+        val s = vm.state.value
+        assertTrue(s.readOnly, "no prompt from an answer-only device")
+        assertTrue(s.mayPressKeys)
+        assertTrue(s.canAnswer)
+        assertFalse(s.canSend)
+
+        vm.answer(Answer.Enter).join()
+        runCurrent()
+        assertNull(vm.state.value.error)
+        assertTrue(actions.waited.isNotEmpty(), "the key went out and its turn was waited for")
+
+        val readonly = SessionViewModel(ID, fleet, FakeActions(), backgroundScope, canSendPrompts = false)
+        runCurrent()
+        assertFalse(readonly.state.value.mayPressKeys, "a readonly device still presses nothing")
+    }
+
+    /**
+     * Review w18-3: the key's receipt is in hand; a long poll that fails
+     * after it (a lift, Wi-Fi to cellular) is not a failed answer.
+     */
+    @Test
+    fun a_failed_wait_after_an_accepted_answer_is_not_reported_as_a_failed_write() = runTest {
+        val fake = FakeActions()
+        val actions = object : SessionActions by fake {
+            override suspend fun waitForTurn(sessionId: Long, turn: Long, timeoutS: Int): WaitResult =
+                throw HubError.Transport(ConnectException())
+        }
+        val fleet = FakeFleetState(listOf(blockedRow()))
+        fleet.hubVersion.value = HUB_VERSION_KEYS
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+
+        vm.answer(Answer.Enter).join()
+        runCurrent()
+
+        assertNull(vm.state.value.error, "no \"May have gone through\" for an answer the hub took")
+        assertFalse(vm.state.value.answering)
+        assertTrue(vm.state.value.stillWaiting, "the row has not moved: still waiting, as after a timeout")
+    }
+
+    /**
+     * Review w09-3: a queued prompt whose answer was lost and which the
+     * read-back cannot see (typed at once) goes back in the box; sent again,
+     * it carries the same `client_msg_id`, so the hub answers the first call.
+     */
+    @Test
+    fun the_same_words_queued_again_after_a_lost_answer_reuse_the_send_id() = runTest {
+        val fake = FakeActions()
+        val ids = mutableListOf<String>()
+        var lose = true
+        val actions = object : SessionActions by fake {
+            override suspend fun queuePrompt(sessionId: Long, prompt: String, timing: SendLaterTiming, clientMsgId: String): QueuePromptResult {
+                ids += clientMsgId
+                if (lose) throw HubError.Tool("E_SSH_TIMEOUT", "timed out")
+                return fake.queuePrompt(sessionId, prompt, timing)
+            }
+        }
+        val fleet = FakeFleetState(listOf(row(status = "working")), tools = setOf("queue_prompt", "queued_prompts"))
+        fleet.capabilities.value = fleet.capabilities.value.copy(params = mapOf("queue_prompt" to setOf("session_id", "prompt", "client_msg_id")))
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope, queueWhileWorking = true)
+        runCurrent()
+        vm.onDraftChange("also check CI")
+        vm.send().join()
+        runCurrent()
+        assertEquals("also check CI", vm.state.value.draft, "the hub lists nothing waiting: back in the box")
+
+        lose = false
+        vm.send().join()
+        runCurrent()
+        assertEquals(2, ids.size)
+        assertEquals(ids[0], ids[1], "the retry is the same send to the hub")
+
+        vm.onDraftChange("and the docs")
+        vm.send().join()
+        runCurrent()
+        assertTrue(ids[2] != ids[0], "new words are a new send")
+    }
 }
 
 /** Named as the JVM's own, so [HubError.Transport.kind] reads as a connect failure on every target. */
