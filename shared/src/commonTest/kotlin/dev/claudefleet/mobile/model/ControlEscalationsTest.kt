@@ -83,6 +83,14 @@ class ControlEscalationsTest {
         assertEquals(1, escalations(listOf(asks.copy(turnSeq = 5)), null, setOf(key)).size)
     }
 
+    /** Review w16-6: a digit run past Int in a digest is no count, and never a crash. */
+    @Test
+    fun a_digest_with_an_absurd_more_count_still_parses() {
+        val note = parseFleetPrompt("[fleet events]\n- pine (#12) finished a turn\n- … and 99999999999 more")!!
+        assertEquals(1, note.events.size)
+        assertEquals(0, note.more)
+    }
+
     @Test
     fun a_digests_folded_card_previews_its_first_event() {
         val note = parseFleetPrompt("[fleet events] What changed.\n- pine (#12) finished a turn\n- host htz is unreachable")!!

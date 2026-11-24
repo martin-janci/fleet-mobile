@@ -65,7 +65,8 @@ fun parseFleetPrompt(prompt: String?): FleetNote? {
             if (line.startsWith("- ")) {
                 val item = line.substring(2).trim()
                 val m = MORE.find(item)
-                if (m != null) more += m.groupValues[1].toInt() else if (item.isNotEmpty()) events += event(item)
+                // A digit run too long for an Int is no count; never a throw inside composition.
+                if (m != null) more += m.groupValues[1].toIntOrNull() ?: 0 else if (item.isNotEmpty()) events += event(item)
             } else if (line.isNotEmpty() && events.isEmpty()) {
                 header += line
             }

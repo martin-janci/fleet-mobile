@@ -1849,6 +1849,7 @@ private fun SessionOverflowMenu(
                     archive = orbit.onArchive != null,
                     kill = manage && state.canKill,
                     pinned = session?.isPinned == true,
+                    cleanUp = mayCleanUp(session),
                     pin = state.canPin,
                     worktree = onRepo != null,
                     sendLater = state.canSendLater,
@@ -1982,11 +1983,13 @@ private fun SessionOverflowMenu(
                 if (state.canPin) {
                     DropdownMenuItem(text = { Text("Pin") }, enabled = actionable, onClick = { expanded = false; onSetPinned(true) })
                 }
-                DropdownMenuItem(
-                    text = { Text("Clean up…") },
-                    enabled = actionable,
-                    onClick = { expanded = false; showSafeKillConfirm = true },
-                )
+                if (mayCleanUp(state.session)) {
+                    DropdownMenuItem(
+                        text = { Text("Clean up…") },
+                        enabled = actionable,
+                        onClick = { expanded = false; showSafeKillConfirm = true },
+                    )
+                }
             }
             if (state.canKill) {
                 DropdownMenuItem(
@@ -2136,7 +2139,7 @@ private fun ManageDialogs(
     if (showRestartConfirm) {
         ConfirmSheet(
             title = "Restart this session?",
-            body = "This kills and recreates the tmux session in place — for a wedged REPL.",
+            body = restartConfirmBody(state.session?.claudeStatus == "working"),
             confirm = "Restart",
             onConfirm = { hideRestartConfirm(); onRestart() },
             onDismiss = hideRestartConfirm,

@@ -1574,6 +1574,50 @@ class SessionViewModelTest {
         )
     }
 
+    /** w10-3: Esc ends a turn without moving `turn_seq`; the row leaving `working` is the cue to read its end. */
+    @Test
+    fun a_row_that_stops_working_without_a_new_turn_is_read_once_more() = runTest {
+        val actions = FakeActions()
+        actions.answer = Conversation(listOf(turn("t1", "do it")))
+        val fleet = FakeFleetState(listOf(row(status = "working", turnSeq = 3)))
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        vm.load().join()
+
+        fleet.sessions.value = listOf(row(status = "idle", turnSeq = 3))
+        fleet.sessionChanges.tryEmit(ID)
+        pastDebounce()
+        runCurrent()
+        assertEquals(2, actions.reads, "the interrupted turn's last lines")
+
+        fleet.sessions.value = listOf(row(status = "idle", activity = "x", turnSeq = 3))
+        fleet.sessionChanges.tryEmit(ID)
+        pastDebounce()
+        runCurrent()
+        assertEquals(2, actions.reads, "and then it is settled")
+    }
+
+    /** w10-4: `/clear` changes `claude_session_id` and nothing else; the screen starts over on the new conversation. */
+    @Test
+    fun a_new_claude_session_id_starts_the_conversation_over() = runTest {
+        val actions = FakeActions()
+        actions.answer = Conversation(listOf(turn("t1", "old")))
+        val fleet = FakeFleetState(listOf(row(status = "idle", turnSeq = 3).copy(claudeSessionId = "a")))
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        vm.load().join()
+
+        // A re-list leaves the column out: not a change.
+        fleet.sessions.value = listOf(row(status = "idle", turnSeq = 3))
+        runCurrent()
+        assertEquals(1, actions.reads)
+
+        actions.answer = Conversation(listOf(turn("t2", "new")))
+        fleet.sessions.value = listOf(row(status = "idle", turnSeq = 3).copy(claudeSessionId = "b"))
+        runCurrent()
+
+        assertEquals(listOf<Long?>(null, null), actions.cursors, "a full window, not since the old turn")
+        assertEquals(listOf<String?>("new"), vm.state.value.conversation.turns.map { it.prompt })
+    }
+
     /** A completed turn is news on any status. */
     @Test
     fun a_completed_turn_refetches_even_on_a_settled_session() = runTest {
@@ -3155,7 +3199,7 @@ class SessionViewModelTest {
     @Test
     fun safe_kill_calls_the_hub_and_refetches() = runTest {
         val actions = FakeActions()
-        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        val vm = SessionViewModel(ID, FakeFleetState(listOf(row().copy(status = "running"))), actions, backgroundScope)
         vm.load().join()
         val readsBefore = actions.reads
 
@@ -3164,6 +3208,25 @@ class SessionViewModelTest {
 
         assertEquals(listOf(ID), actions.safeKilled)
         assertTrue(actions.reads > readsBefore)
+    }
+
+    /** Review w17-2: the hub types the clean-up prompt into the pane, so never a shell, a stopped session or one already asked. */
+    @Test
+    fun clean_up_is_not_sent_for_a_shell_a_stopped_session_or_one_already_asked() = runTest {
+        val running = row().copy(status = "running")
+        for (r in listOf(running.copy(kind = "shell"), running.copy(status = "stopped"), running.copy(safeKillState = "requested"))) {
+            val actions = FakeActions()
+            val vm = SessionViewModel(ID, FakeFleetState(listOf(r)), actions, backgroundScope)
+            vm.load().join()
+            vm.safeKill().join()
+            runCurrent()
+            assertTrue(actions.safeKilled.isEmpty(), "$r")
+            assertFalse(mayCleanUp(r))
+        }
+        assertTrue(mayCleanUp(running))
+        assertTrue(orbitMenuItems(OrbitMenuFacts(manage = true, cleanUp = false)).none { it.id == OrbitItem.Retire })
+        assertEquals("This kills and recreates the tmux session in place — for a wedged REPL. The turn in progress is lost.", restartConfirmBody(working = true))
+        assertFalse(restartConfirmBody(working = false).contains("lost"))
     }
 
     @Test

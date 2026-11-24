@@ -77,6 +77,26 @@ fun Conversation.appending(fresh: Conversation): Conversation {
     // merged is one that an opening screen walks straight past.
     if (turns.isEmpty()) return fresh.withinCeiling()
 
+    // The running turn again, cut by the hub's read tail (w10-1). A caught-up
+    // phone asks for one turn; once that turn's transcript outgrows the tail
+    // its prompt entry is no longer read, so the hub answers a prompt-less
+    // turn stamped with the first assistant entry still in the tail — a stamp
+    // that moves on every read. It is the held last turn, not a new one, when
+    // that entry is no later than the held turn's own latest: the held turn
+    // keeps its prompt and takes the fresher items.
+    val last = turns.last()
+    val cut = fresh.turns.singleOrNull()?.takeIf { it.isTailCut() }
+    if (cut != null && !last.isTailCut() && (last.prompt != null || last.promptUuid != null)) {
+        val startedInside = cut.at != null && last.endedAt != null && cut.at <= last.endedAt
+        if (startedInside) {
+            return copy(
+                turns = turns.dropLast(1) + last.copy(items = cut.items, endedAt = cut.endedAt ?: last.endedAt),
+                context = fresh.context ?: context,
+                events = fresh.events.ifEmpty { events },
+            )
+        }
+    }
+
     val held = turns.map { it.identity() }
     val arrived = fresh.turns.map { it.identity() }
     var overlap = 0
@@ -126,7 +146,11 @@ fun Conversation.appending(fresh: Conversation): Conversation {
     }
     return Conversation(
         turns = kept + fresh.turns,
-        truncated = truncated || fresh.truncated,
+        // With an overlap the held head already covers what the hub's
+        // narrower window dropped (a `since_turn` read is one turn and says
+        // `truncated` whenever the conversation has more): only a real gap
+        // adds the flag (w10-2).
+        truncated = truncated || (overlap == 0 && fresh.truncated),
         // Both a rolling-window read like `turns` itself, not a ledger: the
         // freshest read's own picture replaces the held one rather than being
         // merged into it, and falls back to what was already held only when
@@ -180,7 +204,21 @@ private fun Conversation.withinCeiling(): Conversation =
         copy(turns = turns.takeLast(MAX_RETAINED_TURNS), truncated = true)
     }
 
-private fun ConvTurn.identity(): Pair<String?, String?> = at to prompt
+/**
+ * A turn is known by its `at` and `prompt`, except a tail-cut one
+ * ([isTailCut]): its `at` moves with the hub's read tail, so every such turn
+ * shares the empty identity and successive copies splice over each other.
+ */
+private fun ConvTurn.identity(): Pair<String?, String?> = if (isTailCut()) null to null else at to prompt
+
+/**
+ * Assistant output whose prompt lies before the hub's read tail: no prompt, no
+ * prompt entry, and it opens on the agent's own output. A compaction boundary
+ * or a notification-only turn has no prompt either, but opens on its own item
+ * and has a stable `at`.
+ */
+private fun ConvTurn.isTailCut(): Boolean = prompt == null && promptUuid == null &&
+    items.firstOrNull().let { it is ConvItem.Text || it is ConvItem.Tool || it is ConvItem.Subagent }
 
 /**
  * The one rule for "did the tail move": how many turns there are, and when

@@ -52,6 +52,12 @@ data class SessionRow(
      */
     @SerialName("lost_reason") val lostReason: String? = null,
     @SerialName("turn_seq") val turnSeq: Long = 0,
+    /**
+     * The conversation the session is in. Changes on `/clear` and resume,
+     * which is all it is read for. Null from a re-list (the hub's phone view
+     * leaves it out) until the row's next frame.
+     */
+    @SerialName("claude_session_id") val claudeSessionId: String? = null,
     @SerialName("pr_url") val prUrl: String? = null,
     /** passing | failing | pending, from the PR's check rollup. */
     @SerialName("ci_status") val ciStatus: String? = null,

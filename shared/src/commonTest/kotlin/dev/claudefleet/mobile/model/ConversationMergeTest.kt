@@ -134,6 +134,63 @@ class ConversationMergeTest {
         assertEquals(1, have.appending(conversation(orphan)).turns.size)
     }
 
+    /**
+     * w10-1: the running turn outgrew the hub's read tail, so each one-turn
+     * read answers it without its prompt and with an `at` that moved. It is
+     * the held turn, with fresher items: never one more copy per read.
+     */
+    @Test
+    fun the_running_turn_cut_by_the_read_tail_is_not_repeated_as_its_at_drifts() {
+        val live = ConvTurn(prompt = "fix it", at = "t10", endedAt = "t15", promptUuid = "u1", items = listOf(ConvItem.Text("one")))
+        var held = conversation(turn("t01", "a"), live)
+        for ((n, at) in listOf("t12", "t14", "t16").withIndex()) {
+            val cut = ConvTurn(at = at, endedAt = "t2$n", items = listOf(ConvItem.Text("tail $n")))
+            held = held.appending(conversation(cut, truncated = true))
+        }
+
+        assertEquals(listOf("a", "fix it"), held.turns.map { it.prompt })
+        assertEquals("u1", held.turns.last().promptUuid)
+        assertEquals(listOf("tail 2"), held.turns.last().items.map { it.label })
+        assertEquals("t22", held.turns.last().endedAt)
+        assertFalse(held.truncated, "a one-turn read over held turns is no gap")
+    }
+
+    /** A cut turn that began after the held one ended is another turn; its later copies replace it. */
+    @Test
+    fun a_cut_turn_that_started_after_the_held_one_is_kept_once() {
+        var held = conversation(ConvTurn(prompt = "a", at = "t10", endedAt = "t11", items = listOf(ConvItem.Text("done"))))
+        for (at in listOf("t30", "t31", "t32")) {
+            held = held.appending(conversation(ConvTurn(at = at, endedAt = at, items = listOf(ConvItem.Text("x $at")))))
+        }
+
+        assertEquals(2, held.turns.size)
+        assertEquals(listOf("done"), held.turns[0].items.map { it.label })
+        assertEquals(listOf("x t32"), held.turns[1].items.map { it.label })
+    }
+
+    /** The ten-turn window's cut first turn drifts too; the window still overlaps what is held. */
+    @Test
+    fun a_cut_first_turn_of_a_window_does_not_break_the_overlap() {
+        val have = conversation(ConvTurn(at = "t1", items = listOf(ConvItem.Text("x"))), turn("t2", "b"))
+        val fresh = conversation(ConvTurn(at = "t1b", items = listOf(ConvItem.Text("y"))), turn("t2", "b"), turn("t3", "c"))
+
+        assertEquals(listOf("t1b", "t2", "t3"), have.appending(fresh).turns.map { it.at })
+    }
+
+    /**
+     * w10-2: a caught-up read asks for one turn and the hub marks it truncated
+     * because the conversation has more. The held turns are those: no banner.
+     */
+    @Test
+    fun a_narrower_read_that_overlaps_does_not_mark_a_complete_conversation_truncated() {
+        val have = conversation(turn("t1", "a"), turn("t2", "b"), turn("t3", "c"))
+        val fresh = conversation(turn("t3", "c", "more"), truncated = true)
+
+        val merged = have.appending(fresh)
+        assertEquals(3, merged.turns.size)
+        assertFalse(merged.truncated)
+    }
+
     // ---- context/events: task 5 review, "zero test coverage" ----
     //
     // `appending()` is a rolling-window merge like `turns` itself, not a

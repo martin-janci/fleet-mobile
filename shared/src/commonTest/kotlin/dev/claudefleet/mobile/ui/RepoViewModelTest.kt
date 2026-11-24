@@ -191,6 +191,13 @@ class RepoViewModelTest {
         assertNotNull(vm.state.value.notice)
     }
 
+    /** Review w16-6: a hunk header with a number past Int is still a hunk line, not a crash. */
+    @Test
+    fun a_hunk_header_with_an_absurd_number_does_not_throw() {
+        val lines = diffLines("@@ -3 +3 @@\n a\n@@ -99999999999 +1 @@\n b")
+        assertEquals(listOf(LineKind.Hunk, LineKind.Plain, LineKind.Hunk, LineKind.Plain), lines.map { it.kind })
+    }
+
     @Test
     fun diff_lines_know_what_they_are() {
         val kinds = diffLines("diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n c").map { it.kind }
