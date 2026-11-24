@@ -248,8 +248,14 @@ class TicketsViewModel(
         }
     }
 
+    /** Bumped by [close]: a resume that lands after it finds the person gone. */
+    private var closes = 0
+
     fun close() {
-        local.update { Local(filters = it.filters, sort = it.sort, sections = it.sections) }
+        closes++
+        // `busy` outlives the sheet: a resume still on the wire must not be
+        // offered again on reopening (review w16-3).
+        local.update { Local(filters = it.filters, sort = it.sort, sections = it.sections, busy = it.busy) }
     }
 
     // ── Filters ──
@@ -493,20 +499,28 @@ class TicketsViewModel(
         val detail = state.value.selected ?: return null
         if (detail.ticket.key != ask.key || !detail.canResume || local.value.busy) return null
         local.update { it.copy(busy = true, error = null) }
+        val asked = closes
         return scope.launch {
-            try {
-                val row = actions.resume(ask.key, ask.host)
+            // The session opens only while the person is still on the sheet:
+            // one who closed it, or whom a notification took elsewhere, is
+            // not pulled into it when the resume lands (review w16-3); the
+            // ticket's row shows it live.
+            fun land(sessionId: Long) {
+                val here = closes == asked
                 local.update { it.copy(busy = false) }
-                close()
-                onOpenSession(row.id)
+                if (here) {
+                    close()
+                    onOpenSession(sessionId)
+                }
+            }
+            try {
+                land(actions.resume(ask.key, ask.host).id)
             } catch (e: CancellationException) {
                 throw e
             } catch (t: Throwable) {
                 val jump = (t as? HubError.Tool)?.existingSessionId()
                 if (jump != null) {
-                    local.update { it.copy(busy = false) }
-                    close()
-                    onOpenSession(jump)
+                    land(jump)
                 } else {
                     if (t is HubError.Tool && t.isUnknownAction()) fleet.actionMissing(WORK_LINK, RESUME)
                     local.update { it.copy(busy = false, error = friendlyWork(t)) }

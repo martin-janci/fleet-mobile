@@ -17,6 +17,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -133,7 +134,9 @@ internal fun StepRow(s: MissionStep, item: String?, enabled: Boolean, handlers: 
 
 @Composable
 internal fun CardRow(c: MissionCard, state: MissionsUiState, mayChange: Boolean, handlers: MissionsHandlers) {
-    var answer by remember(c.id) { mutableStateOf("") }
+    // Saveable: a LazyColumn item leaves composition when scrolled away,
+    // and a typed answer must survive that (review w16-6).
+    var answer by rememberSaveable(c.id) { mutableStateOf("") }
     val enabled = state.canDecide && mayChange && state.busy == null
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 6.dp)) {
         Text(c.line(), style = MaterialTheme.typography.bodyMedium)

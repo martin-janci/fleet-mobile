@@ -94,7 +94,7 @@ class RecoveryTest {
         assertEquals("Cannot reach the hub", friendlyWrite(HubError.Transport(UnknownHostException())).title)
         assertFalse(mayHaveRun(IllegalStateException("local")))
         // A read keeps its plain words: friendly() is unchanged.
-        assertEquals("The hub refused that", friendly(HubError.Tool("E_SSH_TIMEOUT", "x")).title)
+        assertEquals("The host took too long to answer over SSH", friendly(HubError.Tool("E_SSH_TIMEOUT", "x")).title)
 
         val kept = NotSent("deploy", friendlyWrite(HubError.Tool("E_TIMEOUT", "x")), "sp-1", mayHaveRun = true)
         assertEquals("May have gone through", notSentHeadline(kept))

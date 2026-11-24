@@ -63,7 +63,7 @@ private const val WEEK = 7 * 86_400L
 
 /** The list's groups, each newest first. */
 data class MissionGroups(
-    /** Active missions that wait on a person, the longest waiting first ([missionWaits]). */
+    /** Missions that wait on a person, a paused one with a question among them, the longest waiting first ([missionWaits]). */
     val waiting: List<Mission> = emptyList(),
     val running: List<Mission>,
     val paused: List<Mission>,
@@ -83,7 +83,7 @@ internal fun missionGroups(missions: List<Mission>, nowSeconds: Long): MissionGr
     return MissionGroups(
         waiting = waiting,
         running = newest.filter { it.state == "active" && it.id !in waitingIds },
-        paused = newest.filter { it.state == "paused" },
+        paused = newest.filter { it.state == "paused" && it.id !in waitingIds },
         drafts = newest.filter { it.state == "draft" },
         doneThisWeek = newest.filter { it.state in FINISHED && nowSeconds - it.updatedAt < WEEK },
     )
@@ -93,11 +93,12 @@ private val FINISHED = setOf("completed", "failed", "cancelled")
 
 /** "3 running · 1 paused", "No missions running". */
 internal fun missionsHeadline(g: MissionGroups): String = buildList {
-    // A waiting mission is still running: it is counted in both, as the board says "3 running · 1 waits on you".
-    val active = g.running.size + g.waiting.size
+    // A waiting mission is still running (or paused): it is counted in both, as the board says "3 running · 1 waits on you".
+    val active = g.running.size + g.waiting.count { it.state != "paused" }
+    val paused = g.paused.size + g.waiting.count { it.state == "paused" }
     if (active > 0) add("$active running")
     if (g.waiting.isNotEmpty()) add("${g.waiting.size} ${if (g.waiting.size == 1) "waits" else "wait"} on you")
-    if (g.paused.isNotEmpty()) add("${g.paused.size} paused")
+    if (paused > 0) add("$paused paused")
     if (g.drafts.isNotEmpty()) add("${g.drafts.size} ${if (g.drafts.size == 1) "draft" else "drafts"}")
 }.joinToString(" · ").ifEmpty { "No missions running" }
 

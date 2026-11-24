@@ -1,6 +1,10 @@
 package dev.claudefleet.mobile.notify
 
 import dev.claudefleet.mobile.data.ConnectionStatus
+import dev.claudefleet.mobile.net.ContractVerdict
+import dev.claudefleet.mobile.net.MAX_HUB_CONTRACT
+import dev.claudefleet.mobile.net.sentence
+import kotlin.test.assertTrue
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -61,9 +65,12 @@ class BackgroundNoteTest {
             "Can't reach the hub since 18:40. No alerts until it answers.",
             watchingNotice(ConnectionStatus.Reconnecting(WATCH_GRACE_ATTEMPTS, "Can't reach the hub from this network."), down, utc),
         )
-        assertEquals(
-            "Not watching: this hub needs a newer version of the app. Update it to get alerts again.",
-            watchingNotice(ConnectionStatus.Refused("this hub is newer than the app"), down, utc),
-        )
+        // Review w04-5: the verdict says which side to update.
+        val hubOld = ContractVerdict.HubTooOld(1).sentence()!!
+        assertEquals("Not watching. $hubOld", watchingNotice(ConnectionStatus.Refused(hubOld), down, utc))
+        assertTrue(hubOld.endsWith("Update the hub."))
+        val appOld = ContractVerdict.AppTooOld(MAX_HUB_CONTRACT + 1).sentence()!!
+        assertEquals("Not watching. $appOld", watchingNotice(ConnectionStatus.Refused(appOld), down, utc))
+        assertTrue(appOld.endsWith("Update the app."))
     }
 }

@@ -16,6 +16,9 @@ import platform.UserNotifications.UNUserNotificationCenter
 /** Where a mission's notification carries its mission, for the tap (`AppDelegate` reads it). */
 const val MISSION_ID_KEY: String = "missionId"
 
+/** Where a failed routine's notification carries its routine, for the tap (`AppDelegate` reads it; review w16-4). */
+const val ROUTINE_ID_KEY: String = "routineId"
+
 /**
  * Where a notification carries the hub it was posted for, so a tap on one
  * left up from an earlier pairing does not open the same id on another hub
@@ -77,12 +80,13 @@ class IosAlertPoster(private val hub: () -> String?) : AlertPoster {
         center.setNotificationCategories(categories.toSet())
     }
 
-    /** A routine run failed: one per run, in the same thread; a tap opens the app. */
+    /** A routine run failed: one per run, in the same thread; a tap opens that routine in Automation. */
     override fun postRoutine(alert: RoutineFailedAlert) {
         val content = UNMutableNotificationContent().apply {
             setTitle(alert.title)
             setBody(alert.text)
             setThreadIdentifier(NEEDS_YOU_THREAD)
+            setUserInfo(withHub(ROUTINE_ID_KEY to NSNumber.numberWithLongLong(alert.routineId)))
             setSound(UNNotificationSound.defaultSound)
         }
         center.addNotificationRequest(

@@ -367,7 +367,7 @@ class NeedsYouService : Service() {
         val watch = MissionWaitWatch(container.prefs)
         while (true) {
             val missions = try {
-                client.workMissions()
+                client.workMissions(waiting = true)
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Exception) {
@@ -418,9 +418,22 @@ class NeedsYouService : Service() {
         builder.addAction(0, action.label, intent)
     }
 
-    /** One "a routine run failed" notification; a tap opens the app. */
+    /**
+     * One "a routine run failed" notification; a tap opens that routine in
+     * Automation, its runs and why it failed (review w16-4), under a request
+     * code and action of its own so it never resolves to another tap.
+     */
     private fun postRoutine(alert: RoutineFailedAlert) {
-        val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
+        val open = PendingIntent.getActivity(
+            this,
+            ROUTINE_BASE + (alert.runId % 100_000).toInt(),
+            Intent(this, MainActivity::class.java)
+                .setAction(ACTION_OPEN_ROUTINE)
+                .putExtra(EXTRA_ROUTINE_ID, alert.routineId)
+                .putExtra(EXTRA_HUB, hub)
+                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
         val n = NotificationCompat.Builder(this, ALERTS)
             .setSmallIcon(R.drawable.ic_notify)
             .setContentTitle(alert.title)
@@ -465,6 +478,10 @@ class NeedsYouService : Service() {
         const val ACTION_OPEN_MISSION = "dev.claudefleet.mobile.NEEDS_YOU_OPEN_MISSION"
         /** The mission a mission's notification opens. */
         const val EXTRA_MISSION_ID = "dev.claudefleet.mobile.MISSION_ID"
+        /** A failed routine's alert tap (review w16-4). */
+        const val ACTION_OPEN_ROUTINE = "dev.claudefleet.mobile.NEEDS_YOU_OPEN_ROUTINE"
+        /** The routine a failed routine's notification opens. */
+        const val EXTRA_ROUTINE_ID = "dev.claudefleet.mobile.ROUTINE_ID"
         /** A failure notification's Retry: open the session and retry it in the app. */
         const val ACTION_RETRY = "dev.claudefleet.mobile.NEEDS_YOU_RETRY"
         /** The service's own intent for a notification's Later. */

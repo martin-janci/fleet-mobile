@@ -69,13 +69,7 @@ class DraftMemory(private val prefs: Prefs? = null) {
      */
     private val unsent: MutableMap<Long, NotSent> = linkedMapOf()
 
-    fun recallUnsent(sessionId: Long): String? = unsent[sessionId]?.text
-
     fun recallNotSent(sessionId: Long): NotSent? = unsent[sessionId]
-
-    fun keepUnsent(sessionId: Long, text: String?) {
-        keepNotSent(sessionId, text?.let { NotSent(it, RECALLED_NOT_SENT) })
-    }
 
     fun keepNotSent(sessionId: Long, notSent: NotSent?) {
         unsent.remove(sessionId)
@@ -102,9 +96,6 @@ class DraftMemory(private val prefs: Prefs? = null) {
     }
 
     companion object {
-        /** Why a prompt kept by its words alone was not sent: unknown, so the card asks for a look. */
-        val RECALLED_NOT_SENT = Friendly("Maybe not sent", "The hub may not have taken this prompt. Check the conversation, then retry it or edit it.", isError = false)
-
         /** The prefs key: a flat list of session id, draft, session id, draft, … */
         const val KEY = "composer_drafts"
         /** The prefs key of the hub the drafts were typed for ([forHub]). */

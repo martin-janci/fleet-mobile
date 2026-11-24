@@ -5,6 +5,7 @@ import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.NewSessionActions
 import dev.claudefleet.mobile.data.NewSessionRequest
 import dev.claudefleet.mobile.data.WorkActions
+import dev.claudefleet.mobile.model.withoutUntrustedMarker
 import dev.claudefleet.mobile.model.BackgroundOptions
 import dev.claudefleet.mobile.model.BG_AGENT_CLAUDE
 import dev.claudefleet.mobile.model.backgroundAgents
@@ -697,7 +698,7 @@ class NewSessionViewModel(
     }
 
     private suspend fun queuedAlready(sessionId: Long, message: String): Boolean = try {
-        actions.queuedPrompts(sessionId)?.any { it.waiting && it.body == message } == true
+        actions.queuedPrompts(sessionId)?.any { it.waiting && withoutUntrustedMarker(it.body).trim() == message.trim() } == true
     } catch (e: CancellationException) {
         throw e
     } catch (_: Throwable) {

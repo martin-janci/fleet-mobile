@@ -441,6 +441,56 @@ class MissionsTest {
         assertEquals(listOf("start 1 all"), fake.calls, "no read of the mission left")
     }
 
+    /** Review w16-1: a press on mission 1 that lands after the person opened mission 2 writes nothing there. */
+    @Test
+    fun a_press_that_lands_after_another_mission_opened_says_nothing_there() = runTest {
+        var gate = CompletableDeferred<Unit>()
+        val fake = FakeMissionActions()
+        var fail = false
+        val actions = object : MissionActions by fake {
+            override suspend fun start(missionId: Long, step: String?): StartOutcome {
+                gate.await()
+                if (fail) throw HubError.Tool("E_CONFLICT", "moved")
+                return fake.start(missionId, step)
+            }
+        }
+        val vm = MissionsViewModel(MissionsFleet(loop), actions, backgroundScope, canWrite = true)
+        vm.refresh().join()
+        vm.openOne(1).join()
+        runCurrent()
+        val press = vm.start()
+        runCurrent()
+        vm.openOne(2)
+        runCurrent()
+        gate.complete(Unit)
+        press.join()
+        runCurrent()
+        assertNull(vm.state.value.results, "mission 1's step is not mission 2's")
+        assertNull(vm.state.value.notice)
+        assertNull(vm.state.value.error)
+
+        fail = true
+        gate = CompletableDeferred()
+        vm.openOne(1).join()
+        runCurrent()
+        val failing = vm.start()
+        runCurrent()
+        vm.close()
+        gate.complete(Unit)
+        failing.join()
+        runCurrent()
+        assertNull(vm.state.value.error, "a failure on a mission left behind raises no banner")
+        assertNull(vm.state.value.busy)
+    }
+
+    /** Review w16-1: a failed steer on one mission shows in that mission's composer only. */
+    @Test
+    fun a_steer_error_shows_on_its_own_mission() {
+        val s = SteerState(error = Friendly("Not sent", "x", isError = true), errorFor = 1)
+        assertEquals("Not sent", s.errorOn(1)?.title)
+        assertNull(s.errorOn(2))
+    }
+
     @Test
     fun go_sends_the_steps_key_and_reads_the_mission_again() = runTest {
         val actions = FakeMissionActions()

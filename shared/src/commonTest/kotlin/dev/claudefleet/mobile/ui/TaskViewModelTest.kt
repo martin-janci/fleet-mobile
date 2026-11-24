@@ -9,6 +9,7 @@ import dev.claudefleet.mobile.model.LinkState
 import dev.claudefleet.mobile.model.TaskDetail
 import dev.claudefleet.mobile.model.WorkTask
 import dev.claudefleet.mobile.net.HubCapabilities
+import dev.claudefleet.mobile.model.PromotionView
 import dev.claudefleet.mobile.net.HubError
 import dev.claudefleet.mobile.net.ToolCatalog
 import dev.claudefleet.mobile.net.json
@@ -25,6 +26,7 @@ import kotlinx.serialization.json.put
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -52,6 +54,7 @@ private fun TestScope.taskVm(
     scope: CoroutineScope = backgroundScope,
     callScope: CoroutineScope = scope,
     epics: List<dev.claudefleet.mobile.model.EpicFacet> = emptyList(),
+    commentDrafts: TaskCommentDrafts? = null,
 ) = TaskViewModel(
     taskId = "item:12",
     fleet = fleet,
@@ -75,6 +78,7 @@ private fun TestScope.taskVm(
     utcOffset = { 0 },
     refreshDebounceMs = 500,
     callScope = callScope,
+    commentDrafts = commentDrafts,
 )
 
 class TaskViewModelTest {
@@ -874,6 +878,11 @@ class TaskViewModelTest {
         assertEquals(listOf("ABC" to "ABC"), d.promoteTargets.single().choices)
         assertTrue(d.promoteTargets.single().containerRequired)
         assertEquals("Not created in Acme Jira: 403", d.promotion?.let(::promotionLine))
+        // r2 w07-3: a pending promotion whose try failed says why it is still trying.
+        assertEquals(
+            "Still trying to create the ticket in Acme Jira: rate limited",
+            promotionLine(PromotionView(state = "pending", tracker = "Acme Jira", error = "rate limited")),
+        )
     }
 
     // ---- comments (claude-fleet `work_link comment`, the task page's Comments tab) ----
@@ -914,6 +923,39 @@ class TaskViewModelTest {
         val ro = taskVm(actions = FakeWorkActions().apply { taskAnswer = local }, canWrite = false)
         runCurrent()
         assertFalse(ro.state.value.canComment)
+    }
+
+    /**
+     * Review w16-5: the comment box outlives a visit. Typed words come back
+     * on return; a comment refused after the person left comes back with
+     * the refusal; one still on the wire is not posted a second time.
+     */
+    @Test
+    fun a_comment_typed_or_sent_before_leaving_is_not_lost() = runTest {
+        val drafts = TaskCommentDrafts()
+        val gate = CompletableDeferred<Unit>()
+        val actions = FakeWorkActions().apply { taskAnswer = local; writeGate = { gate.await() } }
+        val screen = CoroutineScope(backgroundScope.coroutineContext + Job(backgroundScope.coroutineContext[Job]))
+        val first = taskVm(actions = actions, scope = screen, callScope = backgroundScope, commentDrafts = drafts)
+        runCurrent()
+        first.setCommentDraft("ship it")
+        first.comment()
+        runCurrent()
+        screen.cancel()
+
+        val second = taskVm(actions = actions, commentDrafts = drafts)
+        runCurrent()
+        assertEquals("ship it", second.state.value.commentDraft, "the box is as it was left")
+        assertNull(second.comment(), "the first send is still on the wire")
+
+        actions.failWrite = HubError.Tool("E_FORBIDDEN", "tracker post refused")
+        gate.complete(Unit)
+        runCurrent()
+        val third = taskVm(actions = actions, commentDrafts = drafts)
+        runCurrent()
+        assertEquals("ship it", third.state.value.commentDraft)
+        assertNotNull(third.state.value.error, "the refusal nobody saw is said on return")
+        assertEquals(1, actions.calls.count { it.startsWith("comment ") })
     }
 
     /** Only the reader's own comment is deleted. */

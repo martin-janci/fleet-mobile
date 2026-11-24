@@ -137,13 +137,14 @@ class OrbitMissionsTest {
                 mission(2, "active", ago = 120).copy(waitingOn = MissionWait("sign_grant", since = NOW - 600)),
                 mission(3, "active", ago = 30).copy(waitingOn = MissionWait("question", since = NOW - 3_600)),
                 mission(4, "paused").copy(waitingOn = MissionWait("question", since = NOW - 60)),
+                mission(5, "paused"),
             ),
             NOW,
         )
-        assertEquals(listOf(3L, 2L), g.waiting.map { it.id }, "the longest waiting first")
+        assertEquals(listOf(3L, 2L, 4L), g.waiting.map { it.id }, "the longest waiting first; a paused mission with an open question waits too (w09-1)")
         assertEquals(listOf(1L), g.running.map { it.id }, "a waiting mission is not listed twice")
-        assertEquals(listOf(4L), g.paused.map { it.id }, "a paused mission waits on no one")
-        assertEquals("3 running · 2 wait on you · 1 paused", missionsHeadline(g))
+        assertEquals(listOf(5L), g.paused.map { it.id }, "a waiting paused mission is not listed twice")
+        assertEquals("3 running · 3 wait on you · 2 paused", missionsHeadline(g))
         assertEquals(
             "1 running · 1 waits on you",
             missionsHeadline(missionGroups(listOf(mission(2, "active").copy(waitingOn = MissionWait("confirm", openCards = 1))), NOW)),

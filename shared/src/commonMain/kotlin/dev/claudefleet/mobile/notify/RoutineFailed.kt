@@ -6,7 +6,8 @@ import dev.claudefleet.mobile.store.Prefs
 /**
  * The matrix's Routine failed row (claude-fleet 11.9) as the notifier's
  * reason: not a session's attention reason, so it never reaches the Inbox's
- * session list, only a notification. This phone's Failed switch covers it.
+ * session list; the Inbox lists the routine under its own Failed rows
+ * (review w09-7). This phone's Failed switch covers it.
  */
 const val ROUTINE_FAILED_REASON: String = "routine_failed"
 
@@ -17,7 +18,9 @@ data class RoutineFailedAlert(val runId: Long, val routineId: Long, val title: S
  * What a look at `routines { failing }` tells the notifier: each failed run
  * not in [seen] (run ids at the last look). With no last look, this one is
  * the baseline and nothing is news: a failure older than the watcher is on
- * the Inbox already, as the desktop has it (Attention.svelte, `openedAt`).
+ * the Inbox already (its Failed routine rows, review w09-7), as the desktop
+ * has it (Attention.svelte, `openedAt`). A tap opens [RoutineFailedAlert.routineId]
+ * in Automation (review w16-4).
  * The answer carries the run ids as of [failing], for the next look; a run
  * no longer failing (a Retry, a Pause) drops out of it.
  */

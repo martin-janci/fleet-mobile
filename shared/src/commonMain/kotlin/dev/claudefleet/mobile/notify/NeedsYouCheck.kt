@@ -2,6 +2,7 @@ package dev.claudefleet.mobile.notify
 
 import dev.claudefleet.mobile.data.AppSession
 import dev.claudefleet.mobile.data.FleetState
+import dev.claudefleet.mobile.model.MyAccess
 import dev.claudefleet.mobile.store.Prefs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withTimeoutOrNull
@@ -103,7 +104,17 @@ class NeedsYouCheck(
         // against the wrong ids, and its alerts name other sessions (review w16-1).
         session.credentials()?.hub?.let { hub -> if (prefs.keepSeenForHub(hub)) poster.withdrawAll() }
         val before = prefs.readSeen()
-        val (alerts, after) = needsYouAlerts(before.orEmpty(), rows)
+        // What is shared with this person, and at what level: a session they
+        // only watch is not theirs to answer (review w08-3). A hub without
+        // sharing, or a failed read, treats every row as theirs, as before.
+        val access = try {
+            withTimeoutOrNull(timeout) { session.withClient { MyAccess.of(it.myGrants()) } }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        } ?: MyAccess.UNKNOWN
+        val (alerts, after) = needsYouAlerts(before.orEmpty(), rows, access)
         if (before != null) {
             // The kinds This phone turned off, and those the fleet's matrix or
             // quiet hours hold back, are still remembered as seen, so turning
@@ -142,7 +153,7 @@ class NeedsYouCheck(
      */
     private suspend fun missions() {
         val missions = try {
-            withTimeoutOrNull(timeout) { session.withClient { it.workMissions() } }
+            withTimeoutOrNull(timeout) { session.withClient { it.workMissions(waiting = true) } }
         } catch (e: CancellationException) {
             throw e
         } catch (_: Exception) {

@@ -20,6 +20,7 @@ import dev.claudefleet.mobile.model.signedInElsewhere
 import dev.claudefleet.mobile.model.isSignedOut
 import dev.claudefleet.mobile.model.QueuedPrompt
 import dev.claudefleet.mobile.model.takenBackText
+import dev.claudefleet.mobile.model.withoutUntrustedMarker
 import dev.claudefleet.mobile.model.HostLogin
 import dev.claudefleet.mobile.model.SendLaterTiming
 import dev.claudefleet.mobile.model.ActivityProbe
@@ -589,6 +590,15 @@ class SessionViewModel(
      */
     private val callScope: CoroutineScope? = null,
 ) {
+    /**
+     * On this screen a missing thing is the session: `E_NOTFOUND` reads "This
+     * session is gone" here, and neutral everywhere else (review w15-2).
+     */
+    private fun friendly(t: Throwable): Friendly = friendlySession(t)
+
+    private fun friendlyWrite(t: Throwable): Friendly =
+        if (mayHaveRun(t)) dev.claudefleet.mobile.ui.friendlyWrite(t) else friendlySession(t)
+
     /**
      * The screen state this class owns, as opposed to what the fleet owns.
      *
@@ -1410,7 +1420,7 @@ class SessionViewModel(
             // back in the box to be queued twice (review w17-3).
             val unknown = mayHaveRun(t)
             val queued = if (unknown) orNullUnlessCancelled { actions.queuedPrompts(sessionId) }?.filter { q -> q.waiting } else null
-            if (queued != null && queued.any { q -> q.body == body }) {
+            if (queued != null && queued.any { q -> withoutUntrustedMarker(q.body).trim() == body.trim() }) {
                 quickReplies.remember(body)
                 local.update { it.copy(sending = false, pending = null, queued = queued) }
                 return

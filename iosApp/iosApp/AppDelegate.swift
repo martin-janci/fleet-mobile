@@ -68,6 +68,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         let hub = content.userInfo["hub"] as? String
         if let id = content.userInfo["missionId"] as? NSNumber {
             MainViewControllerKt.onOpenMission(missionId: id.int64Value, hub: hub)
+        } else if let id = content.userInfo["routineId"] as? NSNumber {
+            MainViewControllerKt.onOpenRoutine(routineId: id.int64Value, hub: hub)
         } else if let id = content.userInfo["sessionId"] as? NSNumber {
             if response.actionIdentifier == "retry" {
                 MainViewControllerKt.onRetrySession(sessionId: id.int64Value, hub: hub)

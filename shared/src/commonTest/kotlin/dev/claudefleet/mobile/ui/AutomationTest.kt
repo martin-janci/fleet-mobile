@@ -32,6 +32,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import dev.claudefleet.mobile.model.FailingRoutine
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -66,8 +67,17 @@ private class FakeRoutineActions : RoutineActions {
 
     override suspend fun routines(): List<Routine> = list.also { calls += "list" }
 
+    /** What `routines { failing }` answers. */
+    var failingList = emptyList<FailingRoutine>()
+
+    override suspend fun failing(): List<FailingRoutine> = failingList.also { calls += "failing" }
+
+    /** Held by a routine's read until completed (a slow link). */
+    var gate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+
     override suspend fun routine(routineId: Long): RoutineDetail {
         calls += "get $routineId"
+        gate?.await()
         return RoutineDetail(routine = list.first { it.id == routineId }, runs = runs[routineId].orEmpty(), mayChange = true)
     }
 
@@ -160,6 +170,60 @@ class AutomationTest {
         actions: FakeRoutineActions = FakeRoutineActions(),
         canWrite: Boolean = true,
     ) = AutomationViewModel(AutomationFleet(caps), actions, backgroundScope, canWrite)
+
+    /**
+     * Review w09-7 and w16-4: a failed routine this person may change is an
+     * Inbox row on the badge, and its tap (or the notification's) opens it.
+     */
+    @Test
+    fun a_failed_routine_is_an_inbox_row_and_opens_in_automation() = runTest {
+        val actions = FakeRoutineActions()
+        actions.failingList = listOf(
+            FailingRoutine(actions.list[0], RoutineRun(id = 12, routineId = 1, state = "failed", startedAt = 300), mayChange = true),
+            FailingRoutine(actions.list[1], RoutineRun(id = 22, routineId = 2, state = "failed", startedAt = 400), mayChange = false),
+        )
+        val failed = FailedRoutinesViewModel(actions, backgroundScope)
+        failed.refresh()
+        runCurrent()
+        assertEquals(listOf(1L), failed.state.value.map { it.routine.id }, "only the ones this person may change")
+        assertEquals(4, needYouCount(1, 1, 0, 1, failed.state.value.size))
+
+        val vm = automation(actions = actions)
+        runCurrent()
+        vm.openRoutine(1)
+        runCurrent()
+        assertTrue(vm.state.value.open)
+        assertEquals(1L, vm.state.value.detail?.routine?.id)
+    }
+
+    /** Review w16-2: Back or a tab switch while a routine loads is not undone by its late answer. */
+    @Test
+    fun a_routine_read_that_answers_after_back_is_dropped() = runTest {
+        val actions = FakeRoutineActions()
+        val vm = automation(actions = actions)
+        runCurrent()
+        vm.open()
+        runCurrent()
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        actions.gate = gate
+        vm.select(1)
+        runCurrent()
+        vm.back()
+        gate.complete(Unit)
+        runCurrent()
+        assertNull(vm.state.value.detail, "Back stays back")
+        assertFalse(vm.state.value.loading)
+
+        val again = kotlinx.coroutines.CompletableDeferred<Unit>()
+        actions.gate = again
+        vm.select(1)
+        runCurrent()
+        vm.show(AutomationTab.Runs)
+        again.complete(Unit)
+        runCurrent()
+        assertNull(vm.state.value.detail, "the Runs tab stays the Runs list")
+        assertEquals(AutomationTab.Runs, vm.state.value.tab)
+    }
 
     @Test
     fun a_hub_without_routines_is_never_asked() = runTest {

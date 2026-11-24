@@ -501,8 +501,11 @@ the log the hub reads afterwards.
   (Settings, off until turned on) keeps a foreground service holding the hub's
   event stream open, with its own quiet notification, and posts one when a
   session comes to need you — waiting, stuck, failed or needing a decision —
-  while the app is not on screen; a tap opens that session. iOS has no such
-  thing: it would need APNs and a sender in the hub, which is its own piece of
+  while the app is not on screen; a tap opens that session. On iOS the same
+  setting schedules a background refresh (`BGAppRefreshTask`): iOS decides
+  when it runs, with no fixed interval (Settings says so under the switch),
+  and each run checks the hub and posts the same alerts. There is still no
+  APNs push: that would need a sender in the hub, which is its own piece of
   work.
 - **No offline mirror.** The last snapshot stays on screen when the hub is
   unreachable, with a banner, and actions are disabled rather than hidden.

@@ -28,9 +28,9 @@ class DraftMemoryTest {
         first.keep(12, "kept from before hubs were recorded")
         first.forHub("https://a.example")
         assertEquals("kept from before hubs were recorded", first.recall(12), "the first hub recorded keeps what is there")
-        first.keepUnsent(12, "refused")
+        first.keepNotSent(12, NotSent("refused", Friendly("Not sent", "refused", isError = true)))
         first.forHub("https://a.example")
-        assertEquals("refused", first.recallUnsent(12), "the same hub again keeps the unsent prompt")
+        assertEquals("refused", first.recallNotSent(12)?.text, "the same hub again keeps the unsent prompt")
 
         val next = DraftMemory(prefs)
         next.forHub("https://a.example")
@@ -41,7 +41,7 @@ class DraftMemoryTest {
         assertEquals("", DraftMemory(prefs).recall(12), "and the store forgets them too")
         // Review w24: on the instance that kept it, so the check is not vacuous.
         first.forHub("https://b.example")
-        assertEquals(null, first.recallUnsent(12), "hub A's refused prompt is not hub B's #12's")
+        assertEquals(null, first.recallNotSent(12)?.text, "hub A's refused prompt is not hub B's #12's")
     }
 
     @Test

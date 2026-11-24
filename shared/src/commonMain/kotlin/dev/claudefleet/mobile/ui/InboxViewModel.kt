@@ -108,10 +108,12 @@ fun inboxRowActions(
 
 /**
  * The missions waiting on a person (contract 15's `waiting_on`, the
- * desktop's `waitingOf`): active ones only, the longest waiting first.
+ * desktop's `waitingOf`), the longest waiting first. The hub's `waiting_on`
+ * decides: a mission a brake paused with an open question waits too, not
+ * only an active one (review w09-1).
  */
 fun missionWaits(missions: List<Mission>): List<Mission> =
-    missions.filter { it.state == "active" && it.waitingOn != null }
+    missions.filter { it.waitingOn != null }
         .sortedWith(compareBy<Mission> { it.waitingOn?.since ?: 0 }.thenBy { it.id })
 
 /**
@@ -174,17 +176,20 @@ class InboxViewModel(
     private val _state = MutableStateFlow(InboxUiState())
 
     /**
-     * Each row's Retry send id, by session and prompt, kept until a press is
-     * answered: a press whose answer was lost goes out again under the same
-     * id, which the hub replays rather than typing the prompt twice (review w17-4).
+     * Each row's Retry send id, by session, prompt and turn, kept until a
+     * press is answered: a press whose answer was lost goes out again under
+     * the same id, which the hub replays rather than typing the prompt twice
+     * (review w17-4). A later turn that fails is a new failure with an id of
+     * its own, and a row that left Needs you drops its id ([keepOnly]), so
+     * the hub's cached answer is never replayed for it (review w04-4).
      */
-    private val retryIds = mutableMapOf<Pair<Long, String>, String>()
+    private val retryIds = mutableMapOf<Triple<Long, String, Long>, String>()
     val state: StateFlow<InboxUiState> = _state.asStateFlow()
 
     /** Retry the last turn of a failed row: [inboxRowActions]'s prompt, sent again. */
     fun retry(row: SessionRow, switchAvailable: Boolean = false): Job? {
         val prompt = inboxRowActions(row, canWrite, switchAvailable, null).retryPrompt ?: return null
-        val key = row.id to prompt
+        val key = Triple(row.id, prompt, row.turnSeq)
         val id = retryIds.getOrPut(key) { newPromptSendId(clock()) }
         return press(row.id, write = true) {
             actions.retry(row.id, prompt, id)
@@ -253,6 +258,7 @@ class InboxViewModel(
      */
     fun keepOnly(needYou: Set<Long>) {
         val s = _state.value
+        retryIds.keys.removeAll { it.first !in needYou && it.first !in s.busy }
         if (s.notices.keys.all { it in needYou } && s.switchTargets.keys.all { it in needYou } && s.waiting.keys.all { it in needYou }) return
         _state.update {
             it.copy(

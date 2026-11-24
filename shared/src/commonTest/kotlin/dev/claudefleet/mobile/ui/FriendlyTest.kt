@@ -34,10 +34,28 @@ class FriendlyTest {
         assertTrue(f.isError)
     }
 
+    /** Review w15-2: only the session screen says a missing thing is the session. */
     @Test
-    fun a_missing_session_reads_as_gone() {
-        val f = friendly(HubError.Tool("E_NOTFOUND", "no session 21520"))
-        assertEquals("This session is gone", f.title)
+    fun a_missing_thing_reads_as_not_found_and_a_missing_session_as_gone() {
+        val f = friendly(HubError.Tool("E_NOTFOUND", "routine 4 not found"))
+        assertEquals("Not found", f.title)
+        assertFalse("session" in f.body)
+        assertEquals("E_NOTFOUND: routine 4 not found", f.details)
+        assertEquals("This session is gone", friendlySession(HubError.Tool("E_NOTFOUND", "no session 21520")).title)
+    }
+
+    /** Review w15-3: transport and internal failures in words, not "refused" over log text. */
+    @Test
+    fun transport_and_internal_codes_read_plainly_with_the_log_under_details() {
+        val ssh = friendly(HubError.Tool("E_SSH", "ssh mercury: no free connection within 20s"))
+        assertEquals("Couldn't reach the host over SSH", ssh.title)
+        assertFalse("mercury" in ssh.body)
+        assertEquals("E_SSH: ssh mercury: no free connection within 20s", ssh.details)
+        for (code in listOf("E_HOST_OFFLINE", "E_AGENT_OFFLINE", "E_TMUX", "E_SQLITE", "E_LOCK", "E_INTERNAL")) {
+            assertTrue(friendly(HubError.Tool(code, "log text")).title != "The hub refused that", code)
+        }
+        // A write that may have run still says so.
+        assertEquals("May have gone through", friendlyWrite(HubError.Tool("E_SSH_TIMEOUT", "x")).title)
     }
 
     @Test

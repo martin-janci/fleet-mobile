@@ -110,6 +110,24 @@ class InboxViewModelTest {
         assertTrue(hub.retryIds[2] != hub.retryIds[1], "answered: the next Retry is a new send")
     }
 
+    /**
+     * Review w04-4: a lost Retry's id does not outlive its outcome. A later
+     * failed turn, or the row coming back after it left Needs you, is a new
+     * send the hub types, not a replay of its cached answer.
+     */
+    @Test
+    fun a_lost_retrys_id_is_not_reused_for_a_later_failure() = runTest {
+        val hub = FakeInbox(refuse = HubError.Tool("E_SSH_TIMEOUT", "timed out"))
+        val vm = InboxViewModel(hub, this, canWrite = true)
+        vm.retry(failed().copy(turnSeq = 4)); runCurrent()
+        vm.retry(failed().copy(turnSeq = 5)); runCurrent()
+        assertTrue(hub.retryIds[1] != hub.retryIds[0], "a later turn: a new send")
+
+        vm.keepOnly(emptySet())
+        vm.retry(failed().copy(turnSeq = 5)); runCurrent()
+        assertTrue(hub.retryIds[2] != hub.retryIds[1], "the row left Needs you: its id went with it")
+    }
+
     /** Review w17-5: a row that leaves Needs you takes its notice and Switch proposal with it. */
     @Test
     fun a_notice_and_a_proposal_go_when_their_row_leaves_needs_you() = runTest {
@@ -280,12 +298,14 @@ class InboxViewModelTest {
             Mission(id = 2, name = "b", state = "active", waitingOn = MissionWait("sign_grant", since = 100)),
             Mission(id = 3, name = "c", state = "active"),
             Mission(id = 4, name = "d", state = "paused", waitingOn = MissionWait("question", since = 50)),
+            Mission(id = 5, name = "e", state = "paused"),
         )
-        assertEquals(listOf(2L, 1L), missionWaits(missions).map { it.id })
+        // Review w09-1: a mission a brake paused with an open question waits too.
+        assertEquals(listOf(4L, 2L, 1L), missionWaits(missions).map { it.id })
         assertEquals("sign the autonomy grant", missionAskWords(MissionWait("sign_grant")))
         assertEquals("answer its question", missionAskWords(MissionWait("question")))
         assertEquals("confirm 3 commands", missionAskWords(MissionWait("confirm", openCards = 3)))
         assertEquals("confirm 1 command", missionAskWords(MissionWait("confirm", openCards = 1)))
-        assertEquals("5 need you · 0 running", inboxSubtitle(3 + missionWaits(missions).size, 0))
+        assertEquals("6 need you · 0 running", inboxSubtitle(3 + missionWaits(missions).size, 0))
     }
 }

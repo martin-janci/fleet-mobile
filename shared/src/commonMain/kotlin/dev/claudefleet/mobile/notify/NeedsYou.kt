@@ -2,9 +2,11 @@ package dev.claudefleet.mobile.notify
 
 import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.FleetState
+import dev.claudefleet.mobile.model.MyAccess
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.fingerprint
 import dev.claudefleet.mobile.model.reasonLabel
+import dev.claudefleet.mobile.ui.answersHere
 import dev.claudefleet.mobile.ui.inboxRowActions
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
@@ -58,9 +60,15 @@ data class NeedsYouResolved(val sessionId: Long) : NeedsYouEvent
  * [seen] is the reason each session had at the last look (null: needed
  * nothing); the answer carries the reasons as of [rows], for the next look.
  */
-fun needsYouAlerts(seen: Map<Long, String?>, rows: List<SessionRow>): Pair<List<NeedsYouAlert>, Map<Long, String?>> {
-    val now = rows.associate { it.id to it.notifyKey }
-    val alerts = rows.mapNotNull { row ->
+fun needsYouAlerts(
+    seen: Map<Long, String?>,
+    rows: List<SessionRow>,
+    /** Who this person is and what is shared with them: a session they only watch is its owner's to answer (review w08-3). */
+    access: MyAccess = MyAccess.UNKNOWN,
+): Pair<List<NeedsYouAlert>, Map<Long, String?>> {
+    val mine = rows.filter { answersHere(access.levelFor(it)) }
+    val now = rows.associate { it.id to if (answersHere(access.levelFor(it))) it.notifyKey else null }
+    val alerts = mine.mapNotNull { row ->
         val reason = row.notifyReason ?: return@mapNotNull null
         val key = row.notifyKey
         val before = seen[row.id]
@@ -137,11 +145,11 @@ fun needsYouEvents(
 ): Flow<NeedsYouEvent> = flow {
     var seen: Map<Long, String?>? = remembered
     var persisted: Map<Long, String?>? = null
-    combine(fleet.sessions, fleet.status) { rows, status -> rows to status }
-        .filter { (_, status) -> status is ConnectionStatus.Connected }
-        .collect { (rows, _) ->
+    combine(fleet.sessions, fleet.status, fleet.access) { rows, status, access -> Triple(rows, status, access) }
+        .filter { (_, status, _) -> status is ConnectionStatus.Connected }
+        .collect { (rows, _, access) ->
             val before = seen
-            val (alerts, after) = needsYouAlerts(before.orEmpty(), rows)
+            val (alerts, after) = needsYouAlerts(before.orEmpty(), rows, access)
             seen = after
             // Once, then only when a reason (or its dialog) moved: `onSeen` persists the whole
             // map, and most session frames change none (review r16).

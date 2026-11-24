@@ -30,11 +30,15 @@ class MissionWaitingTest {
 
     @Test
     fun a_paused_or_answered_mission_is_forgotten_and_says_nothing() {
-        val paused = waiting(2).copy(state = "paused")
+        val paused = Mission(id = 2, name = "", state = "paused")
         val answered = Mission(id = 3, name = "", state = "active")
         val (alerts, seen) = missionWaitAlerts(emptyMap(), listOf(paused, answered))
         assertEquals(emptyList(), alerts)
         assertEquals(emptyMap(), seen)
+        // Review w09-1: a brake's pause with an open question is the hub's
+        // `waiting_on`, and it is news like any other wait.
+        val braked = waiting(5, reason = "question").copy(state = "paused")
+        assertEquals(listOf("Mission waits for you to answer its question"), missionWaitAlerts(emptyMap(), listOf(braked)).first.map { it.text })
         assertEquals("Mission 4", missionWaitAlerts(emptyMap(), listOf(waiting(4).copy(name = " "))).first.single().title)
     }
 

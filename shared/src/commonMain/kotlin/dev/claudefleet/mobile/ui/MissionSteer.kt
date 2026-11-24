@@ -59,6 +59,8 @@ data class SteerState(
     val sending: Long? = null,
     val receipts: List<SteerReceipt> = emptyList(),
     val error: Friendly? = null,
+    /** The mission [error] is about: shown only in that mission's composer (review w16-1). */
+    val errorFor: Long? = null,
     /**
      * Steers Control took, by mission, counted for good: [receipts] is capped,
      * so its size stops growing and cannot tell the composer a send went
@@ -66,6 +68,9 @@ data class SteerState(
      */
     val delivered: Map<Long, Int> = emptyMap(),
 )
+
+/** [SteerState.error] when it is about mission [missionId]: another mission's composer never shows it. */
+fun SteerState.errorOn(missionId: Long): Friendly? = error?.takeIf { errorFor == null || errorFor == missionId }
 
 /** What the mission detail draws its composer from. */
 data class MissionSteerUi(
@@ -112,7 +117,7 @@ class MissionSteer(
         if (busy(fleet.sessions.value) != null) return null
         val op = operator(fleet.sessions.value) ?: return null
         val caps = fleet.capabilities.value
-        local.update { it.copy(sending = m.id, error = null) }
+        local.update { it.copy(sending = m.id, error = null, errorFor = null) }
         return scope.launch {
             try {
                 // Into Control's queue where the hub keeps one, as Control's
@@ -146,13 +151,13 @@ class MissionSteer(
                 local.update { it.copy(sending = null) }
                 throw e
             } catch (t: Throwable) {
-                local.update { it.copy(sending = null, error = friendly(t)) }
+                local.update { it.copy(sending = null, error = friendly(t), errorFor = m.id) }
             }
         }
     }
 
     fun dismissError() {
-        local.update { it.copy(error = null) }
+        local.update { it.copy(error = null, errorFor = null) }
     }
 
     private companion object {

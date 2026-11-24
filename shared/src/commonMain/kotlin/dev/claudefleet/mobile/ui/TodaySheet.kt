@@ -60,6 +60,10 @@ import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.StatusCategory
 import dev.claudefleet.mobile.model.askedAt
 import dev.claudefleet.mobile.model.TodayGroup
+import dev.claudefleet.mobile.model.TodayMission
+import dev.claudefleet.mobile.model.missionWaitLabel
+import dev.claudefleet.mobile.model.standupText
+import dev.claudefleet.mobile.model.waitingLine
 import dev.claudefleet.mobile.model.TodaySection
 import dev.claudefleet.mobile.model.TodaySession
 import dev.claudefleet.mobile.model.TodayShipped
@@ -89,6 +93,8 @@ data class TodayHandlers(
     val onClearFilters: () -> Unit = {},
     /** Tidy-up — what is stale, and the choice of what to do with it; null where it is not offered. */
     val onOpenTidy: (() -> Unit)? = null,
+    /** Open a waiting mission's detail; null where missions are not offered (the row is not a button). */
+    val onOpenMission: ((Long) -> Unit)? = null,
 )
 
 /**
@@ -125,12 +131,30 @@ fun TodaySheet(
      */
     waitingNow: List<SessionRow>? = null,
     nowSeconds: Long = 0,
+    /**
+     * The header's "N need you": the bar badge's own count (sessions,
+     * missions, agent actions, review asks, failed routines), so the two
+     * never disagree (review w09-6). Null counts [waitingNow].
+     */
+    needYou: Int? = null,
 ) {
     val clipboard = LocalClipboardManager.current
     val share = rememberShareText()
+    val f = state.filters
+    val waitingLive = waitingNow
+        ?.filter { f.host == null || it.hostAlias == f.host }
+        ?.filter { !f.ticketsOnly || it.work != null }
+        ?.takeIf { f.sections.isEmpty() || TodaySection.Waiting in f.sections }
+    // What Copy standup hands on is what the sheet draws: the live rows
+    // under Waiting on me, not the digest's (review w09-6).
+    val standup = if (waitingNow == null) {
+        state.standup
+    } else {
+        standupText(state.shown, waitingLive.orEmpty().map { waitingLine(it.displayName, it.attention?.reason) })
+    }
     // Keyed on the text: "Copied" is about this standup, and a re-read that
     // changes it puts the button back.
-    var copied by remember(state.standup) { mutableStateOf(false) }
+    var copied by remember(standup) { mutableStateOf(false) }
     ModalBottomSheet(
         onDismissRequest = handlers.onClose,
         // The sheet one step darker than its cards: the separation is the
@@ -138,16 +162,11 @@ fun TodaySheet(
         containerColor = MaterialTheme.colorScheme.surface,
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
-            val f = state.filters
-            val waitingLive = waitingNow
-                ?.filter { f.host == null || it.hostAlias == f.host }
-                ?.filter { !f.ticketsOnly || it.work != null }
-                ?.takeIf { f.sections.isEmpty() || TodaySection.Waiting in f.sections }
-            TodayHeader(state, handlers, needYou = waitingNow?.size)
+            TodayHeader(state, handlers, needYou = needYou ?: waitingNow?.let { it.size + state.view.missions.size })
             // Reserved whether or not it is loading, so a re-read does not
             // shift the list under a thumb about to tap it.
             InlineLoading(waiting = state.loading)
-            if (state.loaded && !state.view.isEmpty) TodayFilterRow(state, handlers, waitingCount = waitingNow?.size)
+            if (state.loaded && !state.view.isEmpty) TodayFilterRow(state, handlers, waitingCount = waitingNow?.let { it.size + state.view.missions.size })
             ErrorBanner(state.error, onDismiss = handlers.onDismissError)
             val v = state.shown
             LazyColumn(
@@ -163,18 +182,34 @@ fun TodaySheet(
                 }
                 if (waitingNow == null) {
                     groupSection(TodaySection.Waiting, v.waiting, handlers)
-                } else if (!waitingLive.isNullOrEmpty()) {
+                    if (v.missions.isNotEmpty()) {
+                        item(key = "section-waiting-missions") {
+                            SectionCard(TodaySection.Waiting, v.missions.size) {
+                                v.missions.forEachIndexed { i, m ->
+                                    if (i > 0) ItemDivider()
+                                    MissionLine(m, handlers.onOpenMission)
+                                }
+                            }
+                        }
+                    }
+                } else if (!waitingLive.isNullOrEmpty() || v.missions.isNotEmpty()) {
+                    val live = waitingLive.orEmpty()
                     item(key = "section-waiting-live") {
-                        SectionCard(TodaySection.Waiting, waitingLive.size) {
-                            waitingLive.forEachIndexed { i, row ->
+                        SectionCard(TodaySection.Waiting, live.size + v.missions.size) {
+                            live.forEachIndexed { i, row ->
                                 PhoneSessionRow(
                                     row = row,
                                     nowSeconds = nowSeconds,
                                     showHost = true,
                                     since = row.askedAt,
-                                    divider = i < waitingLive.lastIndex,
+                                    divider = i < live.lastIndex || v.missions.isNotEmpty(),
                                     onClick = { handlers.onOpenSession(row.id) },
                                 )
+                            }
+                            // A mission waiting on a person, as the badge counts it (review w09-6).
+                            v.missions.forEachIndexed { i, m ->
+                                if (i > 0) ItemDivider()
+                                MissionLine(m, handlers.onOpenMission)
                             }
                         }
                     }
@@ -208,10 +243,10 @@ fun TodaySheet(
                 filtered = state.filters.any,
                 copied = copied,
                 onCopy = {
-                    clipboard.setText(AnnotatedString(state.standup))
+                    clipboard.setText(AnnotatedString(standup))
                     copied = true
                 },
-                onShare = { share(state.standup) },
+                onShare = { share(standup) },
             )
         }
     }
@@ -484,6 +519,38 @@ private fun ShippedRow(x: TodayShipped) {
         )
         Spacer(Modifier.width(8.dp))
         TonePill(if (x.how == "done") "Done" else "PR", StatusTone.COMPLETED)
+    }
+}
+
+/** A mission waiting on a person: its name and what it waits for; a tap opens it where missions are offered. */
+@Composable
+private fun MissionLine(m: TodayMission, onOpen: ((Long) -> Unit)?) {
+    val name = m.name.ifBlank { "Mission ${m.id}" }
+    val wait = m.waitingOn?.let(::missionWaitLabel)
+    val spoken = listOfNotNull("Mission $name", wait).joinToString(", ")
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = TOUCH_TARGET)
+            .then(if (onOpen != null) Modifier.clickable { onOpen(m.id) } else Modifier)
+            .clearAndSetSemantics {
+                contentDescription = if (onOpen != null) "$spoken. Open mission" else spoken
+                if (onOpen != null) {
+                    role = Role.Button
+                    onClick { onOpen(m.id); true }
+                }
+            }
+            .padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(name, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("Mission", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+        }
+        wait?.let {
+            Spacer(Modifier.width(8.dp))
+            TonePill(it, StatusTone.BLOCKED)
+        }
     }
 }
 

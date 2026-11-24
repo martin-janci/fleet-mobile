@@ -222,6 +222,10 @@ import dev.claudefleet.mobile.ui.InboxViewModel
 import dev.claudefleet.mobile.ui.SessionInboxActions
 import dev.claudefleet.mobile.ui.inboxRowActions
 import dev.claudefleet.mobile.ui.missionWaits
+import dev.claudefleet.mobile.ui.needYouCount
+import dev.claudefleet.mobile.ui.FailedRoutinesViewModel
+import dev.claudefleet.mobile.ui.TaskCommentDrafts
+import dev.claudefleet.mobile.ui.errorOn
 import dev.claudefleet.mobile.ui.help.GuideScreen
 import dev.claudefleet.mobile.ui.help.guideMeters
 import dev.claudefleet.mobile.ui.help.HelpPicker
@@ -541,6 +545,7 @@ class AppContainer(
 
     /** The hub the parked mission tap was posted for; null when it did not say. */
     private var missionTapHub: String? = null
+    private var routineTapHub: String? = null
 
     /**
      * Whether a tap posted for [hub] may act here: it said no hub, or it is
@@ -618,12 +623,28 @@ class AppContainer(
     /** Taken exactly once; null when the tap was posted for another hub. */
     fun consumeOpenMission(): Long? = _openMission.getAndUpdate { null }?.takeIf { tapIsForThisHub(missionTapHub) }
 
+    /**
+     * A failed routine's notification: open that routine in Automation, its
+     * runs and why it failed (review w16-4). Parked like [openSession].
+     */
+    private val _openRoutine = MutableStateFlow<Long?>(null)
+    val openRoutine: StateFlow<Long?> = _openRoutine.asStateFlow()
+
+    fun onOpenRoutine(routineId: Long, hub: String? = null) {
+        routineTapHub = hub
+        _openRoutine.value = routineId
+    }
+
+    /** Taken exactly once; null when the tap was posted for another hub. */
+    fun consumeOpenRoutine(): Long? = _openRoutine.getAndUpdate { null }?.takeIf { tapIsForThisHub(routineTapHub) }
+
     /** Forget a parked notification tap: a new pairing may be another hub, where its id is another session. */
     fun dropOpenRequests() {
         _openSession.value = null
         _questionFocus.value = null
         _retrySession.value = null
         _openMission.value = null
+        _openRoutine.value = null
     }
 
     /**
@@ -786,6 +807,9 @@ class AppContainer(
 
     /** Unsent text per session, across visits to it and across a killed process. */
     val drafts: DraftMemory = DraftMemory(prefs)
+
+    /** A task's comment box across visits (review w16-5). */
+    val taskCommentDrafts: TaskCommentDrafts = TaskCommentDrafts()
 
     /** Review-note drafts and the pending send's id per session, beside [drafts]. */
     val noteDrafts: NoteDraftMemory = NoteDraftMemory(prefs)
@@ -1450,6 +1474,14 @@ private fun FleetRoute(
     val trackersState by trackers.state.collectAsState()
     val automation = remember(repository, scope) { AutomationViewModel(repository, container.routineActions, scope, credentials.canWrite) }
     val automationState by automation.state.collectAsState()
+    // Routines that failed are Inbox rows and count on its badge (review w09-7):
+    // read on every connect, as the review asks are.
+    val failedRoutinesVm = remember(repository, scope) { FailedRoutinesViewModel(container.routineActions, scope, repository.capabilities) }
+    val failedRoutines by failedRoutinesVm.state.collectAsState()
+    val failedRoutinesServed = repository.capabilities.collectAsState().value.has(HubCapabilities.ROUTINES, "failing")
+    LaunchedEffect(failedRoutinesVm, reviewAsksLive, failedRoutinesServed) {
+        if (reviewAsksLive && failedRoutinesServed) failedRoutinesVm.refresh()
+    }
     val debugDevices = remember(repository, scope) { DebugDevicesViewModel(repository, container.deviceActions, scope, credentials.canWrite) }
     val debugDevicesState by debugDevices.state.collectAsState()
     val autofix = remember(repository, scope) { AutofixViewModel(repository, container.autofixActions, scope, credentials.canWrite) }
@@ -1552,6 +1584,19 @@ private fun FleetRoute(
                     id,
                     closers = listOf({ today.close() }, { tidy.close() }, { tickets.close() }, { automation.close() }, { debugDevices.close() }, { pullRequests.close() }, { autofix.close() }),
                     open = { missions.openOne(it) },
+                )
+            }
+        }
+    }
+    // A failed routine's notification: that routine in Automation, over nothing else (review w16-4).
+    val routineRequest by container.openRoutine.collectAsState()
+    LaunchedEffect(routineRequest) {
+        if (routineRequest != null) {
+            container.consumeOpenRoutine()?.let { id ->
+                openOverSheets(
+                    id,
+                    closers = listOf({ today.close() }, { tidy.close() }, { tickets.close() }, { missions.close() }, { debugDevices.close() }, { pullRequests.close() }, { autofix.close() }),
+                    open = { automation.openRoutine(it) },
                 )
             }
         }
@@ -1675,11 +1720,15 @@ private fun FleetRoute(
                 // The Inbox's own rows, so the badge, the Inbox and Today agree (review r09 B1).
                 // A mission waiting on a person counts too (G5.4), as the Inbox's header does.
                 // And a review a colleague asked of this person, as the Inbox's header counts it.
-                val needYou = remember(barRows, barAccess, missionsState.missions, missionsState.available, agentActionsState.pending, reviewRequestsState.asks) {
-                    inboxRows(barRows, barAccess).size +
-                        (if (missionsState.available) missionWaits(missionsState.missions).size else 0) +
-                        agentActionsState.pending.size +
-                        reviewRequestsState.asks.size
+                // And a failed routine this person may change (review w09-7).
+                val needYou = remember(barRows, barAccess, missionsState.missions, missionsState.available, agentActionsState.pending, reviewRequestsState.asks, failedRoutines) {
+                    needYouCount(
+                        inboxRows(barRows, barAccess).size,
+                        if (missionsState.available) missionWaits(missionsState.missions).size else 0,
+                        agentActionsState.pending.size,
+                        reviewRequestsState.asks.size,
+                        failedRoutines.size,
+                    )
                 }
                 // The Orbit Fleet bar: one badge, the Needs you count, on
                 // Inbox. Work's To review count stays on the Work screen.
@@ -2122,6 +2171,8 @@ private fun FleetRoute(
                     LaunchedEffect(agentActionsState.available) { agentActionsVm.refresh() }
                     // So is a review a colleague asked of this person ("Ask for review…").
                     LaunchedEffect(Unit) { reviewRequestsVm.refresh() }
+                    // And a routine that failed (review w09-7).
+                    LaunchedEffect(Unit) { failedRoutinesVm.refresh() }
                     val missionRows = remember(missionsState.missions, missionsState.available) {
                         if (missionsState.available) missionWaits(missionsState.missions) else emptyList()
                     }
@@ -2133,6 +2184,8 @@ private fun FleetRoute(
                         proposedList = proposedList,
                         missionRows = missionRows,
                         onOpenMission = { missions.openOne(it) },
+                        failedRoutines = failedRoutines,
+                        onOpenRoutine = { automation.openRoutine(it) },
                         reviews = reviewRequestsState,
                         onReviewDone = { reviewRequestsVm.done(it) },
                         sessionTitle = { id -> all.firstOrNull { it.id == id }?.let { it.friendlyName ?: it.tmuxName } },
@@ -2171,6 +2224,7 @@ private fun FleetRoute(
                             sessions.refresh()
                             if (missionsState.available) missions.refresh()
                             reviewRequestsVm.refresh()
+                            failedRoutinesVm.refresh()
                         },
                         onOpenSession = nav::open,
                         // Today opens here, and from Control when asked about the day (TodayLink).
@@ -2460,10 +2514,19 @@ private fun FleetRoute(
                         onToggleTicketsOnly = today::toggleTicketsOnly,
                         onClearFilters = today::clearFilters,
                         onOpenTidy = { today.close(); tidy.open(); Unit }.takeIf { tidyState.available },
+                        onOpenMission = { id: Long -> today.close(); missions.openOne(id); Unit }.takeIf { missionsState.available },
                     ),
                     // Waiting on me is the Inbox's own list, so the counts agree.
                     waitingNow = inboxRows(todaySessions, todayAccess),
                     nowSeconds = epochSeconds(),
+                    // The header's count is the badge's own (review w09-6).
+                    needYou = needYouCount(
+                        inboxRows(todaySessions, todayAccess).size,
+                        if (missionsState.available) missionWaits(missionsState.missions).size else 0,
+                        agentActionsState.pending.size,
+                        reviewRequestsState.asks.size,
+                        failedRoutines.size,
+                    ),
                 )
             }
             if (tidyState.open) {
@@ -2583,7 +2646,7 @@ private fun FleetRoute(
                                 blocked = remember(steerRows, steerStatus, controlNow.sessionId) { steer.blocked(steerRows, steerStatus) },
                                 sending = steerState.sending == m.id,
                                 sent = steerState.receipts.filter { it.missionId == m.id },
-                                error = steerState.error,
+                                error = steerState.errorOn(m.id),
                                 onSend = { text -> steer.send(m, text); Unit },
                                 onDismissError = steer::dismissError,
                                 delivered = steerState.delivered[m.id] ?: 0,
@@ -2959,6 +3022,7 @@ private fun TaskRoute(
             onStartHere = onStartHere,
             onOpenTask = onOpenTask,
             callScope = callScope,
+            commentDrafts = container.taskCommentDrafts,
         )
     }
     val state by vm.state.collectAsState()
