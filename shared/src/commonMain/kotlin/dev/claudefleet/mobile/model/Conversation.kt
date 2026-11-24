@@ -82,19 +82,19 @@ fun Conversation.appending(fresh: Conversation): Conversation {
     // its prompt entry is no longer read, so the hub answers a prompt-less
     // turn stamped with the first assistant entry still in the tail — a stamp
     // that moves on every read. It is the held last turn, not a new one, when
-    // that entry is no later than the held turn's own latest: the held turn
-    // keeps its prompt and takes the fresher items.
+    // that entry lies inside the held turn's own span: the held turn keeps
+    // its prompt and takes the fresher items, and whatever the window holds
+    // after it follows on with no gap.
     val last = turns.last()
-    val cut = fresh.turns.singleOrNull()?.takeIf { it.isTailCut() }
-    if (cut != null && !last.isTailCut() && (last.prompt != null || last.promptUuid != null)) {
-        val startedInside = cut.at != null && last.endedAt != null && cut.at <= last.endedAt
-        if (startedInside) {
-            return copy(
-                turns = turns.dropLast(1) + last.copy(items = cut.items, endedAt = cut.endedAt ?: last.endedAt),
-                context = fresh.context ?: context,
-                events = fresh.events.ifEmpty { events },
-            )
-        }
+    val cut = fresh.turns.first().takeIf { it.isTailCut() }
+    if (cut != null && !last.isTailCut() && cut.startedInside(last)) {
+        val merged = copy(
+            turns = turns.dropLast(1) + last.copy(items = cut.items, endedAt = cut.endedAt ?: last.endedAt),
+            context = fresh.context ?: context,
+            events = fresh.events.ifEmpty { events },
+        )
+        val rest = fresh.turns.drop(1)
+        return if (rest.isEmpty()) merged else merged.appending(fresh.copy(turns = rest, truncated = false))
     }
 
     val held = turns.map { it.identity() }
@@ -210,6 +210,14 @@ private fun Conversation.withinCeiling(): Conversation =
  * shares the empty identity and successive copies splice over each other.
  */
 private fun ConvTurn.identity(): Pair<String?, String?> = if (isTailCut()) null to null else at to prompt
+
+/** This cut turn's first surviving entry is stamped within [held]'s span (ISO stamps of one transcript compare as text). */
+private fun ConvTurn.startedInside(held: ConvTurn): Boolean {
+    val first = at ?: return false
+    val from = held.at ?: return false
+    val to = held.endedAt ?: return false
+    return first >= from && first <= to
+}
 
 /**
  * Assistant output whose prompt lies before the hub's read tail: no prompt, no
