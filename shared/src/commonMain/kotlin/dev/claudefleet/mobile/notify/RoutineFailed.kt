@@ -27,7 +27,9 @@ data class RoutineFailedAlert(val runId: Long, val routineId: Long, val title: S
 fun routineFailedAlerts(seen: Set<Long>?, failing: List<FailingRoutine>): Pair<List<RoutineFailedAlert>, Set<Long>> {
     val now = failing.map { it.run.id }.toSet()
     if (seen == null) return emptyList<RoutineFailedAlert>() to now
-    val alerts = failing.filter { it.run.id !in seen }.map { f ->
+    // A routine this person may not change has no row on their Inbox and no
+    // button for them: remembered, never announced (reviews w11-7, w05-8).
+    val alerts = failing.filter { it.run.id !in seen && it.mayChange }.map { f ->
         RoutineFailedAlert(
             f.run.id,
             f.routine.id,

@@ -103,7 +103,7 @@ data class NeedsYouContent(
 )
 
 /** "<session> needs you", "<session> failed" for a failure (MobileControl), "<session> is done" when it finished. */
-fun needsYouHeadline(alert: NeedsYouAlert): String = when (notifyKindOf(alert.reason)) {
+fun needsYouHeadline(alert: NeedsYouAlert): String = alert.headline ?: when (notifyKindOf(alert.reason)) {
     NotifyKind.FAILED -> "${alert.title} failed"
     NotifyKind.NEEDS_YOU -> "${alert.title} needs you"
     NotifyKind.DONE -> "${alert.title} is done"

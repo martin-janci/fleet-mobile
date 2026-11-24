@@ -236,4 +236,96 @@ class NeedsYouTest {
         assertEquals(seen, decodeSeen(encodeSeen(seen)))
         assertEquals(emptyMap(), decodeSeen(listOf("garbage", "=x")))
     }
+
+    /** Review w11-1: a teammate's session seen through team reach (another owner, no grant) is theirs to answer. */
+    @Test
+    fun a_teammates_session_seen_through_team_reach_does_not_alert() {
+        val me = MyAccess(personId = 7)
+        val theirs = row(1, "waiting").copy(ownerPersonId = 2)
+        val (none, seen) = needsYouAlerts(mapOf(1L to null), listOf(theirs), me)
+        assertTrue(none.isEmpty(), "another person's session with no grant is not mine")
+        assertEquals(mapOf<Long, String?>(1L to null), seen)
+        val (own, _) = needsYouAlerts(mapOf(1L to null), listOf(theirs.copy(ownerPersonId = 7)), me)
+        assertEquals(listOf(1L), own.map { it.sessionId })
+        val (unclaimed, _) = needsYouAlerts(mapOf(1L to null), listOf(row(1, "waiting")), me)
+        assertEquals(listOf(1L), unclaimed.map { it.sessionId }, "a row nobody owns is still mine")
+        val (unknown, _) = needsYouAlerts(mapOf(1L to null), listOf(theirs), MyAccess.UNKNOWN)
+        assertEquals(listOf(1L), unknown.map { it.sessionId }, "a hub that has not said who this is gates nothing")
+    }
+
+    /** Review w11-2: a host down is one fact, said once however many sessions it blocks. */
+    @Test
+    fun a_host_down_is_announced_once_for_all_its_sessions() {
+        val before = mapOf<Long, String?>(1L to null, 2L to null, 3L to null, 4L to null)
+        val down = listOf(row(1, "host_down"), row(2, "host_down"), row(3, "host_down"), row(4, "host_down").copy(hostAlias = "oak"))
+        val (alerts, seen) = needsYouAlerts(before, down)
+        assertEquals(listOf(1L, 4L), alerts.map { it.sessionId }, "one per host")
+        assertEquals("3 sessions are blocked", alerts.first().text)
+        assertEquals("pine is down", needsYouContent(alerts.first()).title)
+        assertEquals("host_down", alerts.first().reason)
+        assertEquals("session 4", alerts.last().title, "one session on a host keeps its own alert")
+
+        val (again, seen2) = needsYouAlerts(seen, down)
+        assertTrue(again.isEmpty(), "still down is not news")
+        // A session that joins a cause already said is not news either.
+        val (joined, _) = needsYouAlerts(seen2 + (5L to null), down + row(5, "host_down"))
+        assertTrue(joined.isEmpty())
+        // A bare fact reason remembered by an older build is the same cause.
+        val (legacy, _) = needsYouAlerts(mapOf(1L to "host_down", 2L to null), listOf(row(1, "host_down"), row(2, "host_down")))
+        assertTrue(legacy.isEmpty())
+    }
+
+    /** Review w11-3: when the block lifts, what a session was before it is not news again. */
+    @Test
+    fun a_lifted_block_does_not_announce_the_old_failed_and_done_again() {
+        val failed = row(1, "failed")
+        val done = row(2).copy(claudeStatus = "completed")
+        val (_, seen) = needsYouAlerts(mapOf(1L to null, 2L to null, 3L to null), listOf(failed, done, row(3)))
+        val (_, blocked) = needsYouAlerts(seen, listOf(row(1, "host_down"), row(2, "host_down"), row(3, "host_down")))
+        val (lifted, after) = needsYouAlerts(blocked, listOf(failed, done, row(3)))
+        assertTrue(lifted.isEmpty(), "the same Failed and Done as before the block")
+        assertEquals(seen, after)
+        // What changed under the block is news when it lifts.
+        val (fresh, _) = needsYouAlerts(blocked, listOf(failed, done, row(3, "failed")))
+        assertEquals(listOf(3L), fresh.map { it.sessionId })
+        // And the memory survives the store with a fact in it.
+        assertEquals(blocked, decodeSeen(encodeSeen(blocked)))
+    }
+
+    /** Review w11-8: Done is a turn that ended unread, as on the desktop, not only a background agent's `completed`. */
+    @Test
+    fun a_turn_that_ended_unread_is_done() {
+        val unread = row(1).copy(claudeStatus = "idle", startedAt = 10, lastStopAt = 20)
+        val (first, seen) = needsYouAlerts(mapOf(1L to null), listOf(unread))
+        assertEquals(DONE_REASON, first.single().reason)
+        val (read, after) = needsYouAlerts(seen, listOf(unread.copy(lastViewedAt = 30)))
+        assertTrue(read.isEmpty())
+        assertEquals(mapOf<Long, String?>(1L to null), after, "read: no longer Done")
+        val (working, _) = needsYouAlerts(mapOf(1L to null), listOf(unread.copy(claudeStatus = "working")))
+        assertTrue(working.isEmpty(), "a turn still running is not done")
+        val (routine, _) = needsYouAlerts(mapOf(1L to null), listOf(unread.copy(origin = "routine")))
+        assertTrue(routine.isEmpty())
+    }
+
+    /** Reviews w11-5, w05-1: no look before this connection has read who the person is. */
+    @Test
+    fun a_watched_session_does_not_ring_before_the_access_is_read() = runTest {
+        val settled = MutableStateFlow(false)
+        val grants = MutableStateFlow(MyAccess.UNKNOWN)
+        val fleet = object : FleetState by Fleet() {
+            override val sessions = MutableStateFlow(listOf(row(1, "waiting").copy(ownerPersonId = 2)))
+            override val status = MutableStateFlow<ConnectionStatus>(ConnectionStatus.Connected("0.9.3"))
+            override val access = grants
+            override val accessSettled = settled
+        }
+        val got = mutableListOf<NeedsYouEvent>()
+        // Remembered with the access known: a watched row is nobody's news here.
+        backgroundScope.launch { needsYouEvents(fleet, remembered = mapOf(1L to null)).collect { got += it } }
+        runCurrent()
+        assertTrue(got.isEmpty(), "rows first, access not read yet: no look")
+        grants.value = MyAccess(personId = 7, grants = mapOf(1L to GrantLevel.WATCH))
+        settled.value = true
+        runCurrent()
+        assertTrue(got.isEmpty(), "watched: neither an alert nor a withdrawal")
+    }
 }

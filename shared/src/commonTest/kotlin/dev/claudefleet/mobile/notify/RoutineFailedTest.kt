@@ -13,8 +13,20 @@ import kotlin.test.assertTrue
 
 /** The matrix's Routine failed row on the phone (review r19, R19-5). */
 class RoutineFailedTest {
-    private fun failing(runId: Long, routineId: Long = 7, reason: String? = "exit 1") =
-        FailingRoutine(Routine(routineId, "Nightly deps", hostAlias = "pine"), RoutineRun(runId, routineId, state = "failed", reason = reason))
+    private fun failing(runId: Long, routineId: Long = 7, reason: String? = "exit 1", mayChange: Boolean = true) =
+        FailingRoutine(
+            Routine(routineId, "Nightly deps", hostAlias = "pine"),
+            RoutineRun(runId, routineId, state = "failed", reason = reason),
+            mayChange = mayChange,
+        )
+
+    /** Reviews w11-7, w05-8: a routine this person may not change is on no Inbox list, so it is not announced. */
+    @Test
+    fun a_routine_this_person_may_not_change_is_remembered_and_not_announced() {
+        val (alerts, seen) = routineFailedAlerts(emptySet(), listOf(failing(2, mayChange = false), failing(3)))
+        assertEquals(listOf(3L), alerts.map { it.runId })
+        assertEquals(setOf(2L, 3L), seen)
+    }
 
     @Test
     fun the_first_look_is_a_baseline_and_says_nothing() {

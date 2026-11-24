@@ -12,7 +12,7 @@ import dev.claudefleet.mobile.store.Prefs
 enum class NotifyKind(val label: String, val line: String, val startsOn: Boolean = true) {
     NEEDS_YOU("Needs you", "A session waits for an answer or a permission"),
     FAILED("Failed", "A session stopped with an error, or a routine run failed"),
-    DONE("Done", "A session finished its task", startsOn = false),
+    DONE("Done", "A session finished its turn and has not been read", startsOn = false),
 }
 
 /**

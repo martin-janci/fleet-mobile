@@ -12,7 +12,7 @@ import dev.claudefleet.mobile.store.Prefs
  */
 data class PhoneQuiet(val range: Pair<Int, Int>? = null, val needsYouThrough: Boolean = false) {
     fun allows(reason: String?, minute: Int): Boolean =
-        !inQuietHours(range, minute) || (needsYouThrough && notifyKindOf(reason) == NotifyKind.NEEDS_YOU)
+        !inQuietHours(range, minute) || (needsYouThrough && notifyStateOf(reason) == "needs_you")
 
     /** "22:00-07:00", the hub's own form, or empty when off. */
     val text: String get() = range?.let { (from, until) -> "${clockText(from)}-${clockText(until)}" }.orEmpty()

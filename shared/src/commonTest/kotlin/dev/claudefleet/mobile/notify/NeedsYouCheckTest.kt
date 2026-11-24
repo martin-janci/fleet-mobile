@@ -356,7 +356,7 @@ class KeepSeenWhileOpenTest {
     /** The matrix's Routine failed row (review r19, R19-5): a failed run after the last look is posted once. */
     @Test
     fun a_routine_run_that_failed_since_the_last_look_is_posted() = realTime {
-        val run = """{"routine":{"id":7,"name":"Nightly deps"},"run":{"id":%d,"routine_id":7,"state":"failed"}}"""
+        val run = """{"routine":{"id":7,"name":"Nightly deps"},"run":{"id":%d,"routine_id":7,"state":"failed"},"may_change":true}"""
         val hub = Hub().apply {
             reply = { sse(okResult(rows(1L to null))) to HttpStatusCode.OK }
             failing = "[${run.replace("%d", "41")}]"

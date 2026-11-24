@@ -3,6 +3,7 @@ package dev.claudefleet.mobile.notify
 import dev.claudefleet.mobile.data.AppSession
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.model.MyAccess
+import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.store.Prefs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withTimeoutOrNull
@@ -103,17 +104,36 @@ class NeedsYouCheck(
         // Another hub's seen sets would diff this hub's runs and missions
         // against the wrong ids, and its alerts name other sessions (review w16-1).
         session.credentials()?.hub?.let { hub -> if (prefs.keepSeenForHub(hub)) poster.withdrawAll() }
-        val before = prefs.readSeen()
-        // What is shared with this person, and at what level: a session they
-        // only watch is not theirs to answer (review w08-3). A hub without
-        // sharing, or a failed read, treats every row as theirs, as before.
-        val access = try {
-            withTimeoutOrNull(timeout) { session.withClient { MyAccess.of(it.myGrants()) } }
+        // The fleet's matrix and quiet hours as the hub has them now, not as
+        // the app last read them while it was open (reviews w11-4, w13-1). A
+        // hub or token without `get_settings`, or a failed read, keeps the
+        // last ones.
+        try {
+            withTimeoutOrNull(timeout) { session.withClient { it.settingValues() } }?.let(prefs::writeFleetNotify)
         } catch (e: CancellationException) {
             throw e
         } catch (_: Exception) {
-            null
-        } ?: MyAccess.UNKNOWN
+        }
+        sessions(rows)
+        routines()
+        missions()
+    }
+
+    private suspend fun sessions(rows: List<SessionRow>) {
+        val before = prefs.readSeen()
+        // What is shared with this person, and at what level: a session they
+        // only watch is not theirs to answer (review w08-3). A hub without
+        // sharing (the read is refused) treats every row as theirs, as
+        // before. A read that timed out skips this look instead: with
+        // nothing known every row reads as theirs, and a watched one would
+        // ring and be taken down at the next look (reviews w11-5, w05-1).
+        val access = try {
+            withTimeoutOrNull(timeout) { session.withClient { MyAccess.of(it.myGrants()) } } ?: return
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            MyAccess.UNKNOWN
+        }
         val (alerts, after) = needsYouAlerts(before.orEmpty(), rows, access)
         if (before != null) {
             // The kinds This phone turned off, and those the fleet's matrix or
@@ -123,8 +143,6 @@ class NeedsYouCheck(
             before.filter { (id, reason) -> reason != null && after[id] == null }.keys.forEach(poster::withdraw)
         }
         prefs.writeSeen(after)
-        routines()
-        missions()
     }
 
     /**
