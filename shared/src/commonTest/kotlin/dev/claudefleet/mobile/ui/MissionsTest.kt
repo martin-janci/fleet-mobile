@@ -520,6 +520,37 @@ class MissionsTest {
         assertFalse(vm.state.value.loading, "the spinner ends with the read")
     }
 
+    /** r5-09-7: a press that ends after the person left and reopened the same mission still reads it again. */
+    @Test
+    fun a_press_that_ends_after_the_mission_was_reopened_reads_it_again() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val fake = FakeMissionActions()
+        val actions = object : MissionActions by fake {
+            override suspend fun start(missionId: Long, step: String?): StartOutcome {
+                gate.await()
+                return fake.start(missionId, step)
+            }
+        }
+        val vm = MissionsViewModel(MissionsFleet(loop), actions, backgroundScope, canWrite = true)
+        vm.refresh().join()
+        vm.openOne(1).join()
+        runCurrent()
+        val press = vm.start()
+        runCurrent()
+        vm.close()
+        vm.openOne(1).join()
+        runCurrent()
+        assertNotNull(vm.state.value.busy)
+        fake.calls.clear()
+        fake.detail = fake.detail.copy(mission = fake.detail.mission.copy(state = "paused"))
+        gate.complete(Unit)
+        press.join()
+        runCurrent()
+
+        assertNull(vm.state.value.busy)
+        assertEquals("paused", vm.state.value.detail?.mission?.state, "what the press changed is on screen")
+    }
+
     /** Review w05-5: a press still in flight on a mission is still held when the person comes back to it. */
     @Test
     fun a_mission_left_under_a_press_cannot_be_pressed_twice() = runTest {

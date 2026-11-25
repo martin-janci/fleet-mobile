@@ -164,6 +164,31 @@ class ProjectToolsViewModelTest {
         assertEquals(listOf(20L), vm.state.value.worktrees?.worktrees?.map { it.id })
     }
 
+    /** r5-09-6: a delete that returns after another project was picked does not reload the first one's list over it. */
+    @Test
+    fun a_delete_that_ends_after_another_project_was_picked_leaves_its_list_alone() = runTest {
+        val base = Projects()
+        val slow = CompletableDeferred<Unit>()
+        val asked = mutableListOf<Long>()
+        val actions = object : ProjectActions by base {
+            override suspend fun worktrees(hostAlias: String, projectId: Long): HostWorktrees {
+                asked += projectId
+                return HostWorktrees(hostAlias = hostAlias, projectId = projectId, cloned = true, worktrees = listOf(WorktreeRow(id = projectId * 10, name = "w")))
+            }
+            override suspend fun deleteWorktree(worktreeId: Long) = slow.await()
+        }
+        val vm = ProjectToolsViewModel(ProjFleet(ALL_PROJ), actions, backgroundScope, canWrite = true)
+        vm.loadWorktrees("pine", 1).join()
+        runCurrent()
+        vm.deleteWorktree(10)
+        runCurrent()
+        vm.loadWorktrees("pine", 2).join()
+        slow.complete(Unit)
+        runCurrent()
+        assertEquals(listOf(1L, 2L), asked)
+        assertEquals(2L, vm.state.value.worktrees?.projectId)
+    }
+
     /** Review w17-4: a picked worktree the list no longer has is dropped; an unread list decides nothing. */
     @Test
     fun a_picked_worktree_that_left_the_list_is_gone() {

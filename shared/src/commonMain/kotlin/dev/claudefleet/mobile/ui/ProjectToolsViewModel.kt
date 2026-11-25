@@ -132,6 +132,7 @@ class ProjectToolsViewModel(
         // project's answer landing last would list its worktrees under the
         // one picked since (review w17-3).
         val mine = ++worktreeAsk
+        worktreesFor = hostAlias to projectId
         return scope.launch {
             local.update { it.copy(worktrees = null) }
             if (hostAlias == null || projectId == null || !fleet.capabilities.value.hostWorktrees) return@launch
@@ -145,14 +146,20 @@ class ProjectToolsViewModel(
     /** Counts [loadWorktrees] asks; an answer is applied only to the latest. */
     private var worktreeAsk = 0L
 
+    /** The host and project the latest [loadWorktrees] asked about. */
+    private var worktreesFor: Pair<String?, Long?> = null to null
+
     /** Delete a worktree (refused while a session lives in it), then read the list again. */
     fun deleteWorktree(worktreeId: Long): Job = scope.launch {
-        val wt = local.value.worktrees ?: return@launch
+        local.value.worktrees ?: return@launch
         if (!state.value.canDeleteWorktree || local.value.deleting != null) return@launch
+        val asked = worktreesFor
         local.update { it.copy(deleting = worktreeId, error = null) }
         guarded { actions.deleteWorktree(worktreeId) }
         local.update { it.copy(deleting = null) }
-        loadWorktrees(wt.hostAlias, wt.projectId).join()
+        // Another project picked meanwhile has its own list on the way: a
+        // reload of this one would land over it as the latest ask (r5-09-6).
+        if (worktreesFor == asked) loadWorktrees(asked.first, asked.second).join()
     }
 
     private fun add(onAdded: (Long) -> Unit, what: String?, call: suspend (String) -> dev.claudefleet.mobile.model.ProjectRow): Job = scope.launch {
