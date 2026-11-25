@@ -99,15 +99,20 @@ fun needsYouAlerts(
         now[row.id] = key
         if (reason == null) continue
         val own = ownKey(before)
-        if (own == key) continue
+        // A block just lifted and the row is where it was before it: not
+        // news (review w11-3), but the fact's alert was posted in this
+        // session's own notification, which would go on saying the host is
+        // down. Drawn again as the session's, without a sound (review r5-08-2).
+        val lifted = factOf(before) != null && own == key
+        if (own == key && !lifted) continue
         val sameReason = own != null && reasonOf(own) == reason
         // Same reason, and before knew no question: the dialog's question
         // arrived after the status (the hub reads the pane a moment after
         // the hook). The notification is updated, not announced again.
         // Same reason with a DIFFERENT question is a new question: a session
         // that asks again while still waiting is news, and used to be silent.
-        val quiet = sameReason && questionOf(own) == null
-        if (sameReason && questionOf(key) == null) continue
+        val quiet = lifted || (sameReason && questionOf(own) == null)
+        if (!lifted && sameReason && questionOf(key) == null) continue
         alerts += NeedsYouAlert(
             row.id,
             row.displayName,

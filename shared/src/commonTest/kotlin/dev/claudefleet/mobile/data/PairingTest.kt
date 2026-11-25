@@ -256,7 +256,8 @@ class AppSessionTest {
         app.pair("http://192.168.1.20:8899/pair#$CODE")
 
         assertEquals("http://192.168.1.20:8899", secrets.read()?.hub)
-        assertEquals(listOf("/pair", "/healthz"), calls.requests.map { it.url.encodedPath })
+        assertEquals(listOf("/pair", "/healthz", "/healthz"), calls.requests.map { it.url.encodedPath }, "asked twice before giving it up")
+        assertEquals("https://hub.tailnet.example", app.unreachedEcho, "and the Paired screen says so")
         assertNull(calls.auth(1), "the probe carries no credential")
     }
 

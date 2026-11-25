@@ -29,7 +29,7 @@ fun routineFailedAlerts(seen: Set<Long>?, failing: List<FailingRoutine>): Pair<L
     if (seen == null) return emptyList<RoutineFailedAlert>() to now
     // A routine this person may not change has no row on their Inbox and no
     // button for them: remembered, never announced (reviews w11-7, w05-8).
-    val alerts = failing.filter { it.run.id !in seen && it.mayChange }.map { f ->
+    val alerts = failing.filter { it.run.id !in seen && it.actsHere }.map { f ->
         RoutineFailedAlert(
             f.run.id,
             f.routine.id,

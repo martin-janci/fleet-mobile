@@ -724,7 +724,21 @@ class FleetRepository(
                 launch { _orgs.value = readOrgs(caps) }
                 launch { _accountNames.value = readAccountNames(caps) }
                 launch {
-                    _access.value = readGrants(caps)
+                    // Settled on an answer, or on a catalog the hub answered
+                    // that lists no `my_grants`. A read that fails is tried
+                    // again before the notifier is let look with whatever
+                    // was known: a hub that keeps failing must still alert
+                    // (review r5-08-4).
+                    for (wait in GRANTS_RETRY_MS) {
+                        if (wait > 0) delay(wait)
+                        if (!caps.myGrants) {
+                            if (catalogAnswered) _access.value = MyAccess.UNKNOWN
+                            break
+                        }
+                        val read = readGrantsOrNull() ?: continue
+                        _access.value = read
+                        break
+                    }
                     // Read, or nothing to read: the notifier may look now (reviews w11-5, w05-1).
                     _accessSettled.value = true
                 }
@@ -831,6 +845,15 @@ class FleetRepository(
      * forgetting a watch grant on a blip would light up a Send the hub will
      * refuse.
      */
+    /** One `my_grants` read; null when it did not answer. */
+    private suspend fun readGrantsOrNull(): MyAccess? = try {
+        MyAccess.of(client.myGrants())
+    } catch (e: CancellationException) {
+        throw e
+    } catch (_: Throwable) {
+        null
+    }
+
     private suspend fun readGrants(caps: HubCapabilities): MyAccess {
         if (!caps.myGrants) return MyAccess.UNKNOWN
         return try {
@@ -1020,6 +1043,9 @@ internal fun reconnectDelay(failures: Int): Duration {
     val doublings = (failures - 1).coerceIn(0, 5)
     return minOf(BASE_RECONNECT_DELAY * (1 shl doublings), MAX_RECONNECT_DELAY)
 }
+
+/** The waits before each `my_grants` try of a connection: at once, then 1 s, then 4 s. */
+internal val GRANTS_RETRY_MS: List<Long> = listOf(0L, 1_000L, 4_000L)
 
 /** How long a connection lives past its `ready` before an earlier `lagged` ending is forgotten. */
 internal const val LAG_STREAK_FORGET_SECONDS: Long = 60

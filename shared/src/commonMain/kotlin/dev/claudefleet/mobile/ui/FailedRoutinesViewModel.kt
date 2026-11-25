@@ -69,4 +69,4 @@ class FailedRoutinesViewModel(
 
 /** The Inbox's Failed routine rows: the ones this person may change, newest failure first. */
 fun failedRoutineRows(failing: List<FailingRoutine>): List<FailingRoutine> =
-    failing.filter { it.mayChange }.sortedByDescending { it.run.startedAt }
+    failing.filter { it.actsHere }.sortedByDescending { it.run.startedAt }

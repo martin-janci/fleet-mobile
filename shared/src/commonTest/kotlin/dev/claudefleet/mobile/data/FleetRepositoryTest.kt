@@ -93,6 +93,11 @@ private class FakeHub(
     var usageCalls = 0
         private set
 
+    var grantsJson: String = """{"person_id":7,"grants":[{"session_id":1,"level":"watch"}]}"""
+    var grantsGate: CompletableDeferred<Unit>? = null
+    var failGrants = false
+    var grantsCalls = 0
+        private set
     var settingsJson: String = "{}"
     var settingsCalls = 0
         private set
@@ -133,6 +138,12 @@ private class FakeHub(
                     "\"account_usage\"" in body -> { usageCalls += 1; usageJson }
                     "\"list_accounts\"" in body -> { accountsCalls += 1; accountsJson }
                     "\"tickets\"" in body -> { mineCalls += 1; mineJson }
+                    "my_grants" in body -> {
+                        grantsCalls += 1
+                        grantsGate?.await()
+                        if (failGrants) return@MockEngine respond("upstream is down", HttpStatusCode.BadGateway)
+                        grantsJson
+                    }
                     "get_settings" in body -> { settingsCalls += 1; settingsJson }
                     "list_sessions" in body -> {
                         sessionCalls += 1
@@ -1793,5 +1804,70 @@ class FleetRepositoryTest {
         assertEquals("answer", mode.await())
         assertEquals(1, calls, "a hub that names no contract is left with the mode pairing stored")
         repository.stop()
+    }
+
+    /**
+     * Review r5-08-7 (and r5-08-4): the notifier's look waits on this flag.
+     * False from each `ready`, true once `my_grants` answered; a hub that
+     * lists no `my_grants` settles at once; a read that keeps failing settles
+     * after its last try, so such a hub still alerts.
+     */
+    @Test
+    fun access_settles_when_my_grants_answers_and_not_before() = runTest {
+        val hub = FakeHub().apply {
+            toolsJson = """[{"name":"list_sessions"},{"name":"my_grants"}]"""
+            grantsGate = CompletableDeferred()
+        }
+        val again = CompletableDeferred<Unit>()
+        val second = CompletableDeferred<Unit>()
+        val stream = FakeStream { attempt ->
+            emit(READY)
+            if (attempt == 1) {
+                again.await()
+                throw HubError.Transport(RuntimeException("drop"))
+            }
+            second.complete(Unit)
+            awaitCancellation()
+        }
+        val repository = repo(hub, stream, backgroundScope)
+        repository.start()
+        repository.status.first { it is ConnectionStatus.Connected }
+        while (hub.grantsCalls == 0) delay(10)
+        assertFalse(repository.accessSettled.value, "connected, my_grants not answered yet")
+
+        hub.grantsGate!!.complete(Unit)
+        repository.accessSettled.first { it }
+        assertEquals(7L, repository.access.value.personId)
+
+        // The next connection has not read it yet.
+        hub.grantsGate = CompletableDeferred()
+        val calls = hub.grantsCalls
+        again.complete(Unit)
+        second.await()
+        while (hub.grantsCalls == calls) delay(10)
+        assertFalse(repository.accessSettled.value, "false again from the next ready")
+        hub.grantsGate!!.complete(Unit)
+        repository.accessSettled.first { it }
+        repository.stop()
+    }
+
+    @Test
+    fun access_settles_at_once_on_a_hub_without_my_grants_and_after_the_last_try_on_one_that_fails() = runTest {
+        val none = FakeHub().apply { toolsJson = """[{"name":"list_sessions"}]""" }
+        val a = repo(none, FakeStream { emit(READY); awaitCancellation() }, backgroundScope)
+        a.start()
+        a.accessSettled.first { it }
+        assertEquals(0, none.grantsCalls)
+        a.stop()
+
+        val failing = FakeHub().apply {
+            toolsJson = """[{"name":"list_sessions"},{"name":"my_grants"}]"""
+            failGrants = true
+        }
+        val b = repo(failing, FakeStream { emit(READY); awaitCancellation() }, backgroundScope)
+        b.start()
+        b.accessSettled.first { it }
+        assertEquals(GRANTS_RETRY_MS.size, failing.grantsCalls, "tried again before the notifier is let look")
+        b.stop()
     }
 }

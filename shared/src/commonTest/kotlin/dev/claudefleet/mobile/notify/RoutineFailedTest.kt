@@ -5,6 +5,7 @@ import dev.claudefleet.mobile.model.Routine
 import dev.claudefleet.mobile.model.RoutineRun
 import dev.claudefleet.mobile.store.FakePrefs
 import dev.claudefleet.mobile.store.Prefs
+import kotlinx.serialization.json.Json
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -26,6 +27,18 @@ class RoutineFailedTest {
         val (alerts, seen) = routineFailedAlerts(emptySet(), listOf(failing(2, mayChange = false), failing(3)))
         assertEquals(listOf(3L), alerts.map { it.runId })
         assertEquals(setOf(2L, 3L), seen)
+    }
+
+    /** Review r5-08-3: a hub that answers `failing` without `may_change` did not say no. */
+    @Test
+    fun a_hub_that_does_not_say_may_change_still_announces() {
+        val row = Json { ignoreUnknownKeys = true }.decodeFromString(
+            FailingRoutine.serializer(),
+            """{"routine":{"id":7,"name":"Nightly deps"},"run":{"id":4,"routine_id":7,"state":"failed"}}""",
+        )
+        assertEquals(null, row.mayChange)
+        assertEquals(listOf(4L), routineFailedAlerts(emptySet(), listOf(row)).first.map { it.runId })
+        assertEquals(listOf(row), dev.claudefleet.mobile.ui.failedRoutineRows(listOf(row)))
     }
 
     @Test

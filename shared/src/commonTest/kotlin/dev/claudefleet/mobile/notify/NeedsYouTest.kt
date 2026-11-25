@@ -297,11 +297,22 @@ class NeedsYouTest {
         val (_, seen) = needsYouAlerts(mapOf(1L to null, 2L to null, 3L to null), listOf(failed, done, row(3)))
         val (_, blocked) = needsYouAlerts(seen, listOf(row(1, "host_down"), row(2, "host_down"), row(3, "host_down")))
         val (lifted, after) = needsYouAlerts(blocked, listOf(failed, done, row(3)))
-        assertTrue(lifted.isEmpty(), "the same Failed and Done as before the block")
+        // Not news, but drawn again: the block's alert sat in each session's own notification (review r5-08-2).
+        assertEquals(listOf(1L, 2L), lifted.map { it.sessionId })
+        assertTrue(lifted.all { it.quiet }, "the same Failed and Done as before the block: no sound")
+        assertEquals(listOf("failed", DONE_REASON), lifted.map { it.reason })
         assertEquals(seen, after)
         // What changed under the block is news when it lifts.
         val (fresh, _) = needsYouAlerts(blocked, listOf(failed, done, row(3, "failed")))
-        assertEquals(listOf(3L), fresh.map { it.sessionId })
+        assertEquals(listOf(3L), fresh.filterNot { it.quiet }.map { it.sessionId })
+        // waiting -> host_down -> waiting: one quiet alert, carrying the question again.
+        val asks = row(7, "waiting").copy(pendingInput = PendingInput("permission", "Run git push?", listOf(PendingOption(1, "Yes"))))
+        val (_, waiting) = needsYouAlerts(mapOf(7L to null), listOf(asks))
+        val (_, down) = needsYouAlerts(waiting, listOf(row(7, "host_down")))
+        val (back, again) = needsYouAlerts(down, listOf(asks))
+        assertEquals("Run git push?", back.single().question)
+        assertTrue(back.single().quiet)
+        assertTrue(needsYouAlerts(again, listOf(asks)).first.isEmpty(), "once")
         // And the memory survives the store with a fact in it.
         assertEquals(blocked, decodeSeen(encodeSeen(blocked)))
     }

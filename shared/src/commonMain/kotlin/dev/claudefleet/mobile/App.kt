@@ -996,7 +996,7 @@ fun App(container: AppContainer) {
                         LaunchedEffect(Unit) { container.pairLink.collect { if (it != null) container.consumePairLink() } }
                         val paired = justPaired
                         if (paired != null) {
-                            PairedScreen(paired, onContinue = { justPaired = null }, notifier = container.notifier)
+                            PairedScreen(paired, onContinue = { justPaired = null }, notifier = container.notifier, unreached = container.session.unreachedEcho)
                         } else {
                             FleetRoute(container, state.credentials, fleetCheck = fleetCheck, onFleetCheckDone = { fleetCheck = false })
                             // This phone's lock (redesign 14.11): over the fleet
@@ -1401,11 +1401,15 @@ private fun FleetRoute(
 
     // The Orbit Fleet bar (redesign 14.2), the only one since the 14.13
     // sign-off. A `ui.layout` an older version stored is cleared by AppContainer.
-    val nav = remember(credentials) { Navigator() }
+    // Keyed on the pairing, not the whole credential: a mode the hub changed
+    // (written back from `tools/list`) must not drop the person to the root
+    // tab (review r5-08-6). The repository and the view models stay keyed on
+    // the credential, so the new mode reaches them.
+    val nav = remember(credentials.hub, credentials.token) { Navigator() }
     val screen by nav.screen.collectAsState()
     val tab by nav.tab.collectAsState()
     // The first import after a pair (14.12): set as the fleet check ends, on the New bar only.
-    var importing by remember(credentials) { mutableStateOf(false) }
+    var importing by remember(credentials.hub, credentials.token) { mutableStateOf(false) }
 
     // `Navigator.back()` returns false on a tab specifically so the
     // platform can have the gesture instead, `NavigatorTest` pins that, and a
@@ -1626,7 +1630,7 @@ private fun FleetRoute(
     val workState by myWork.state.collectAsState()
     // A task or a session opened from a mission's detail: the screen under
     // the sheet, and the mission to put back up when back returns there.
-    var missionUnder by remember(credentials) { mutableStateOf<Pair<Screen, Long>?>(null) }
+    var missionUnder by remember(credentials.hub, credentials.token) { mutableStateOf<Pair<Screen, Long>?>(null) }
     LaunchedEffect(screen) {
         val (under, id) = missionUnder ?: return@LaunchedEffect
         when (missionReturn(screen, under)) {
@@ -1689,7 +1693,7 @@ private fun FleetRoute(
     val help by helpSettings.state.collectAsState()
     val practice = remember(container) { PracticeFleet() }
     val practiceState by practice.state.collectAsState()
-    val tourAnchors = remember(credentials) { TourAnchors() }
+    val tourAnchors = remember(credentials.hub, credentials.token) { TourAnchors() }
     // A lesson step only says where to look: going there is the one thing it does.
     val lessonPlace = help.lesson?.let { (lesson, step) -> lesson.steps.getOrNull(step)?.place }
     LaunchedEffect(lessonPlace) {

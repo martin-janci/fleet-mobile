@@ -89,6 +89,13 @@ class AppSession(
     private val _unpairReason = MutableStateFlow<String?>(null)
     override val unpairReason: StateFlow<String?> = _unpairReason.asStateFlow()
 
+    /**
+     * The hub's own address when the last pairing could not reach it and kept
+     * the typed one instead; null otherwise.
+     */
+    val unreachedEcho: String? get() = _unreachedEcho
+    private var _unreachedEcho: String? = null
+
     private var _lastHub: String? = null
     override val lastHub: String? get() = _lastHub
 
@@ -142,7 +149,12 @@ class AppSession(
         // worked; storing one that does not answer loses the hub, and pairing
         // again only repeats it (review w18-8).
         val echoed = preferredBase(echoed = result.hub, reached = reached)
-        val kept = if (echoed == reached || HubClient(http, echoed).reachable()) echoed else reached
+        // Twice, so one slow answer does not decide it for good.
+        val answers = echoed == reached || HubClient(http, echoed).let { it.reachable() || it.reachable() }
+        val kept = if (answers) echoed else reached
+        // Said on the Paired screen: the address kept works only where this
+        // one does (review r5-08-5).
+        _unreachedEcho = echoed.takeIf { !answers }
         val credentials = Credentials(
             hub = kept,
             token = result.token,
