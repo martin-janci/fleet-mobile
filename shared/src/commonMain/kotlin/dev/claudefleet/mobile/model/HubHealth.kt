@@ -73,6 +73,14 @@ data class HubHealth(
      * (review w12-4). Empty from an older hub.
      */
     val hosts: List<HostHealthEntry> = emptyList(),
+    /**
+     * The Writing help toggles that are on, by setting key (`work.prompt_tune`,
+     * …; claude-fleet review w19-2). Sent to every caller, where
+     * `get_settings` answers only the fleet's admin, so a token that cannot
+     * read settings still offers Tune exactly when the hub would serve it.
+     * Null from an older hub, which leaves it out.
+     */
+    @SerialName("writing_help") val writingHelp: List<String>? = null,
 )
 
 /** `fleet_health.updates` (`service::update::UpdatesHealth`). */

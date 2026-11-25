@@ -14,6 +14,7 @@ import dev.claudefleet.mobile.model.SendPromptResult
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.ToolDetail
 import dev.claudefleet.mobile.model.WaitResult
+import dev.claudefleet.mobile.net.HubError
 import kotlinx.coroutines.CancellationException
 
 /** The fleet setting that turns Tune prompt on (claude-fleet `work.prompt_tune`, off by default). */
@@ -163,6 +164,13 @@ interface SessionActions {
      */
     suspend fun promptTuneOn(): Boolean? = null
 
+    /**
+     * The Writing help toggles that are on (`fleet_health.writing_help`,
+     * claude-fleet review w19-2): what a token that cannot read settings
+     * gates Tune on. Null from an older hub, which does not send it.
+     */
+    suspend fun writingHelpOn(): List<String>? = null
+
     /** Stamp the session viewed now (`touch_session_viewed`), so its finished turns read as seen. */
     suspend fun touchViewed(sessionId: Long) {}
 
@@ -293,8 +301,15 @@ class HubSessionActions(private val session: AppSession) : SessionActions {
     override suspend fun tunePrompt(sessionId: Long, draft: String, ask: String, history: List<String>): TuneAnswer =
         session.withClient { it.tunePrompt(sessionId, draft, ask, history) }
 
-    override suspend fun promptTuneOn(): Boolean =
+    override suspend fun promptTuneOn(): Boolean? = try {
         session.withClient { it.settingValues()[PROMPT_TUNE_SETTING] == "true" }
+    } catch (e: HubError.Tool) {
+        // `get_settings` refused: this token may not read the fleet's settings.
+        null
+    }
+
+    override suspend fun writingHelpOn(): List<String>? =
+        session.withClient { it.fleetHealth() }.writingHelp
 
     override suspend fun touchViewed(sessionId: Long) {
         session.withClient { it.touchSessionViewed(sessionId) }

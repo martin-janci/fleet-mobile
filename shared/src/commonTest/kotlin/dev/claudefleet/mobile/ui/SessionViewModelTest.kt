@@ -14,6 +14,7 @@ import dev.claudefleet.mobile.model.NewBgSessionResult
 import dev.claudefleet.mobile.model.BackgroundOptions
 import dev.claudefleet.mobile.data.NewSessionRequest
 import dev.claudefleet.mobile.data.NewSessionActions
+import dev.claudefleet.mobile.data.PROMPT_TUNE_SETTING
 import dev.claudefleet.mobile.data.STOPPED
 import dev.claudefleet.mobile.model.Attention
 import dev.claudefleet.mobile.model.QueuedPrompt
@@ -359,6 +360,18 @@ private class FakeActions : SessionActions {
     var tuneSettingReads = 0
     /** Reads of the setting that fail (the stream reconnecting) before one answers. */
     var tuneSettingFailures = 0
+
+    /**
+     * `fleet_health.writing_help`; null as an older hub, which leaves it out.
+     * Tune is on by default, so a test about the tuner itself finds it offered.
+     */
+    var writingHelp: List<String>? = listOf(PROMPT_TUNE_SETTING)
+    var writingHelpReads = 0
+
+    override suspend fun writingHelpOn(): List<String>? {
+        writingHelpReads++
+        return writingHelp
+    }
 
     override suspend fun promptTuneOn(): Boolean? {
         tuneSettingReads++
@@ -4697,7 +4710,7 @@ class SessionViewModelTest {
         runCurrent()
         assertNull(vm.state.value.tune)
 
-        val unknown = SessionViewModel(ID, FakeFleetState(tools = tools), FakeActions().apply { tuneSetting = null }, backgroundScope)
+        val unknown = SessionViewModel(ID, FakeFleetState(tools = tools), FakeActions().apply { tuneSetting = null; writingHelp = null }, backgroundScope)
         unknown.onDraftChange("tidy this")
         runCurrent()
         assertFalse(unknown.state.value.canTune, "a setting it could not read counts as off")
@@ -4706,6 +4719,42 @@ class SessionViewModelTest {
         on.onDraftChange("tidy this")
         runCurrent()
         assertTrue(on.state.value.canTune)
+    }
+
+    /**
+     * Review w19-2: a token that may not read settings (`get_settings` not
+     * listed to it, or refused) gates Tune on `fleet_health.writing_help`.
+     * Settings it could read still win; with neither answer, Tune stays off.
+     */
+    @Test
+    fun a_token_that_cannot_read_settings_gates_tune_on_the_hubs_writing_help() = runTest {
+        val tuneOnly = setOf(HubCapabilities.SESSION_PROMPT_TUNE)
+        val withSettings = tuneOnly + setOf(HubCapabilities.LIST_PAGES, HubCapabilities.GET_SETTINGS)
+        suspend fun TestScope.canTune(tools: Set<String>, actions: FakeActions): Boolean {
+            val vm = SessionViewModel(ID, FakeFleetState(tools = tools), actions, backgroundScope)
+            vm.onDraftChange("tidy this")
+            runCurrent()
+            return vm.state.value.canTune
+        }
+
+        val listed = FakeActions().apply { writingHelp = listOf("work.context_help", PROMPT_TUNE_SETTING) }
+        assertTrue(canTune(tuneOnly, listed), "settings not listed to the token: the hub's list says on")
+        assertEquals(0, listed.tuneSettingReads, "settings it cannot read are not asked")
+        assertEquals(1, listed.writingHelpReads)
+
+        val notListed = FakeActions().apply { writingHelp = listOf("work.context_help") }
+        assertFalse(canTune(tuneOnly, notListed), "the hub's list leaves work.prompt_tune out: off")
+
+        val refused = FakeActions().apply { tuneSetting = null; writingHelp = listOf(PROMPT_TUNE_SETTING) }
+        assertTrue(canTune(withSettings, refused), "get_settings refused: the hub's list answers")
+        assertEquals(1, refused.tuneSettingReads)
+
+        val olderHub = FakeActions().apply { writingHelp = null }
+        assertFalse(canTune(tuneOnly, olderHub), "neither answer: off, never offered until refused")
+
+        val settingsWin = FakeActions().apply { tuneSetting = false; writingHelp = listOf(PROMPT_TUNE_SETTING) }
+        assertFalse(canTune(withSettings, settingsWin), "settings the token read win over the list")
+        assertEquals(0, settingsWin.writingHelpReads)
     }
 
     @Test

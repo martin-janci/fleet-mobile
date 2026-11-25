@@ -12,6 +12,7 @@ import dev.claudefleet.mobile.data.forbiddenAccountsIn
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.QuickReplyActions
 import dev.claudefleet.mobile.data.SessionActions
+import dev.claudefleet.mobile.data.PROMPT_TUNE_SETTING
 import dev.claudefleet.mobile.data.STOPPED
 import dev.claudefleet.mobile.epochSeconds
 import dev.claudefleet.mobile.model.loginLabel
@@ -869,14 +870,19 @@ class SessionViewModel(
             combine(fleet.capabilities, fleet.status.map { it is ConnectionStatus.Connected }.distinctUntilChanged()) { caps, up -> caps to up }
                 .collectLatest { (caps, up) ->
                     if (!up) return@collectLatest // what was known stays until the next connection reads afresh
-                    if (!caps.promptTune || !caps.fleetSettings || tokenReadOnly) {
+                    if (!caps.promptTune || tokenReadOnly) {
                         local.update { it.copy(tuneSetting = null) }
                         return@collectLatest
                     }
                     for (attempt in 0 until TUNE_SETTING_TRIES) {
                         if (attempt > 0) delay(TUNE_SETTING_RETRY_MS shl (attempt - 1))
                         val on = try {
-                            actions.promptTuneOn()
+                            // Settings the token can read win; where it may
+                            // not (not listed, or `get_settings` refused), the
+                            // hub's `fleet_health.writing_help` answers
+                            // (review w19-2). Neither: unknown, so off.
+                            (if (caps.fleetSettings) actions.promptTuneOn() else null)
+                                ?: actions.writingHelpOn()?.let { PROMPT_TUNE_SETTING in it }
                         } catch (e: CancellationException) {
                             throw e
                         } catch (_: Throwable) {
@@ -2758,20 +2764,21 @@ class SessionViewModel(
     )
 }
 
-/**
- * Tune prompt is on for this hub: it lists `session_prompt_tune`, and the
- * fleet's `work.prompt_tune` is on. A token that reads settings needs the
- * setting read as on (unknown is off, as on the desktop); one that cannot
- * read them is offered the tuner until the hub refuses it as off.
- */
 /** Reads of `work.prompt_tune` per connection before it counts as unknown. */
 private const val TUNE_SETTING_TRIES = 4
 
 /** The first retry's wait; each after doubles it (2 s, 4 s, 8 s). */
 private const val TUNE_SETTING_RETRY_MS = 2_000L
 
+/**
+ * Tune prompt is on for this hub: it lists `session_prompt_tune`, and the
+ * fleet's `work.prompt_tune` is known to be on — from the settings where this
+ * token reads them, else from `fleet_health.writing_help` (review w19-2).
+ * Unknown is off, as on the desktop; a refusal as off turns it off until the
+ * next connection.
+ */
 internal fun promptTuneOn(caps: HubCapabilities, setting: Boolean?): Boolean =
-    caps.promptTune && (if (caps.fleetSettings) setting == true else setting != false)
+    caps.promptTune && setting == true
 
 /**
  * The one rule for "can this screen reach the hub", used by
