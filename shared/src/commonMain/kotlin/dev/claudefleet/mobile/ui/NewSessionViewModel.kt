@@ -457,6 +457,21 @@ class NewSessionViewModel(
         local.update { it.copy(startFrom = from, worktreeId = if (from == StartFrom.Branch) null else it.worktreeId) }
     }
 
+    /**
+     * Put back what was typed before the system killed the process (review
+     * w17-7): the first message, the branch and the name. A field typed since
+     * keeps its own text.
+     */
+    fun restoreTyped(firstMessage: String, branch: String, friendlyName: String) {
+        local.update { l ->
+            l.copy(
+                firstMessage = l.firstMessage.ifEmpty { firstMessage },
+                branch = l.branch.ifEmpty { branch },
+                friendlyName = l.friendlyName.ifEmpty { friendlyName },
+            )
+        }
+    }
+
     fun onFirstMessageChange(text: String) {
         local.update { it.copy(firstMessage = text) }
     }

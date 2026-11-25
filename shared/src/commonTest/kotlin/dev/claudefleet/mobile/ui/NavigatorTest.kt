@@ -508,4 +508,34 @@ class NavigatorTest {
         nav.select(Tab.Sessions)
         assertEquals(Screen.Sessions(), nav.screen.value)
     }
+
+    /** Review w17-7: the screen and its tab come back from the saved line after the process was killed. */
+    @Test
+    fun the_screen_comes_back_from_its_saved_line() {
+        val moves: List<Navigator.() -> Unit> = listOf(
+            { open(7) },
+            { showSessionsFor("pine") },
+            { newSession() },
+            { showSessionsFor("pine"); newSession() },
+            { select(Tab.Work); openTask("t-1") },
+            { open(9); openRepo(9) },
+            { openOverMore(Screen.Settings) },
+            { openMissions() },
+            { select(Tab.Control) },
+        )
+        for (move in moves) {
+            val before = onSessions().apply(move)
+            val after = Navigator().apply { restore(before.saved()) }
+            assertEquals(before.screen.value, after.screen.value)
+            assertEquals(before.tab.value, after.tab.value)
+        }
+        val form = Navigator().apply { restore(onSessions().apply { newSessionIn(3) }.saved()) }
+        assertEquals(Screen.NewSession(projectId = 3), form.screen.value)
+        // Back from a restored pushed screen goes to its tab's root.
+        assertTrue(form.back())
+        assertEquals(Screen.Sessions(), form.screen.value)
+        // A line it cannot read leaves it where it is.
+        val fresh = Navigator().apply { restore("nonsense") }
+        assertEquals(Navigator().screen.value, fresh.screen.value)
+    }
 }

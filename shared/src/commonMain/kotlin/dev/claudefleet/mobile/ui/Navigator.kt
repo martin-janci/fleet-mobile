@@ -368,6 +368,24 @@ class Navigator {
         tab = tabOf(screen) ?: history.lastOrNull()?.let { tabOf(it) } ?: tab,
     )
 
+    /**
+     * Where this navigator is, as one line for the platform's saved state
+     * (review w17-7): the screen and the lit tab, not the history. Back from a
+     * restored pushed screen goes to its tab.
+     */
+    fun saved(): String {
+        val s = nav.value
+        return (listOf(s.tab.name) + screenParts(s.screen)).joinToString(SEP)
+    }
+
+    /** Put back what [saved] wrote; a line it cannot read leaves the navigator where it is. */
+    fun restore(line: String) {
+        val parts = line.split(SEP)
+        val tab = Tab.entries.firstOrNull { it.name == parts.first() } ?: return
+        val screen = screenOf(parts.drop(1)) ?: return
+        move { it.copy(screen = screen, tab = tab, history = emptyList()) }
+    }
+
     /** One move: an atomic step of [nav], then [publish]. */
     private inline fun move(crossinline step: (NavState) -> NavState) {
         nav.update { step(it) }
@@ -394,6 +412,40 @@ class Navigator {
         const val MAX_HISTORY = 16
     }
 }
+
+/** Between the parts of a saved line: a unit separator, which no id, alias or key holds. */
+private const val SEP = "\u001F"
+
+/** [screen] as words [screenOf] reads back; a field that is null is empty. */
+private fun screenParts(screen: Screen): List<String> = when (screen) {
+    is Screen.Sessions -> listOf("Sessions", screen.hostAlias.orEmpty())
+    is Screen.Session -> listOf("Session", screen.id.toString())
+    is Screen.NewSession -> listOf("NewSession", screen.hostAlias.orEmpty(), screen.ticketKey.orEmpty(), screen.projectId?.toString().orEmpty())
+    is Screen.Task -> listOf("Task", screen.taskId)
+    is Screen.Repo -> listOf("Repo", screen.sessionId.toString())
+    is Screen.Guide -> listOf("Guide", screen.pageId)
+    else -> listOf(OBJECT_SCREENS.entries.firstOrNull { it.value == screen }?.key ?: "Inbox")
+}
+
+private fun screenOf(parts: List<String>): Screen? {
+    fun arg(i: Int): String? = parts.getOrNull(i)?.ifEmpty { null }
+    return when (parts.firstOrNull()) {
+        "Sessions" -> Screen.Sessions(hostAlias = arg(1))
+        "Session" -> arg(1)?.toLongOrNull()?.let { Screen.Session(it) }
+        "NewSession" -> Screen.NewSession(hostAlias = arg(1), ticketKey = arg(2), projectId = arg(3)?.toLongOrNull())
+        "Task" -> arg(1)?.let { Screen.Task(it) }
+        "Repo" -> arg(1)?.toLongOrNull()?.let { Screen.Repo(it) }
+        "Guide" -> arg(1)?.let { Screen.Guide(it) }
+        else -> OBJECT_SCREENS[parts.firstOrNull()]
+    }
+}
+
+private val OBJECT_SCREENS: Map<String, Screen> = mapOf(
+    "Hosts" to Screen.Hosts, "Settings" to Screen.Settings, "Work" to Screen.Work, "Files" to Screen.Files,
+    "Usage" to Screen.Usage, "Company" to Screen.Company, "Inbox" to Screen.Inbox, "Control" to Screen.Control,
+    "More" to Screen.More, "Update" to Screen.Update, "Learn" to Screen.Learn, "Practice" to Screen.Practice,
+    "Missions" to Screen.Missions, "Trackers" to Screen.Trackers,
+)
 
 /**
  * A screen pushed over a tab, which back leaves; a tab's own screen is not

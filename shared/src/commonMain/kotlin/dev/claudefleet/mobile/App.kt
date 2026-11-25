@@ -29,6 +29,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -1407,7 +1408,12 @@ private fun FleetRoute(
     // (written back from `tools/list`) must not drop the person to the root
     // tab (review r5-08-6). The repository and the view models stay keyed on
     // the credential, so the new mode reaches them.
-    val nav = remember(credentials.hub, credentials.token) { Navigator() }
+    // The screen comes back after Android killed the process in the
+    // background (review w17-7): the platform's saved state, so a fresh
+    // launch still starts on the first tab. No secret is in it.
+    var savedNav by rememberSaveable(credentials.hub, credentials.token.hashCode()) { mutableStateOf("") }
+    val nav = remember(credentials.hub, credentials.token) { Navigator().also { if (savedNav.isNotEmpty()) it.restore(savedNav) } }
+    LaunchedEffect(nav) { nav.screen.collect { savedNav = nav.saved() } }
     val screen by nav.screen.collectAsState()
     val tab by nav.tab.collectAsState()
     // The first import after a pair (14.12): set as the fleet check ends, on the New bar only.
@@ -2933,6 +2939,19 @@ private fun NewSessionRoute(
     }
     val state by vm.state.collectAsState()
     LaunchedEffect(vm, initialProject) { initialProject?.let(vm::selectProject) }
+    // What was typed comes back after Android killed the process (review
+    // w17-7): read before the first SideEffect below writes this form's own.
+    var typedMessage by rememberSaveable { mutableStateOf("") }
+    var typedBranch by rememberSaveable { mutableStateOf("") }
+    var typedName by rememberSaveable { mutableStateOf("") }
+    val restored = remember(vm) { Triple(typedMessage, typedBranch, typedName) }
+    LaunchedEffect(vm) { vm.restoreTyped(restored.first, restored.second, restored.third) }
+    SideEffect {
+        // A saved state has a size limit; a paste past this is not kept.
+        typedMessage = state.firstMessage.takeIf { it.length <= 16_000 }.orEmpty()
+        typedBranch = state.branch
+        typedName = state.friendlyName
+    }
     // The wizard step lives here so its back gesture is one of
     // `App`'s handlers: on Project or Review it goes one step back; on Where
     // (and while a start runs, which is safe to leave) `nav.back()` leaves.
