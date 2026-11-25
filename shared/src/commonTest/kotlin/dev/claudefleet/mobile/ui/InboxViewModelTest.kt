@@ -8,6 +8,7 @@ import dev.claudefleet.mobile.model.Headroom
 import dev.claudefleet.mobile.model.HostLogin
 import dev.claudefleet.mobile.model.Mission
 import dev.claudefleet.mobile.model.MissionWait
+import dev.claudefleet.mobile.model.personWait
 import dev.claudefleet.mobile.model.PendingInput
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.net.HubError
@@ -325,5 +326,17 @@ class InboxViewModelTest {
         assertEquals("confirm 3 commands", missionAskWords(MissionWait("confirm", openCards = 3)))
         assertEquals("confirm 1 command", missionAskWords(MissionWait("confirm", openCards = 1)))
         assertEquals("6 need you · 0 running", inboxSubtitle(3 + missionWaits(missions).size, 0))
+    }
+
+    /** Review w03-7: a mission the person paused (or Pause all) counts only for the brake's own card. */
+    @Test
+    fun a_mission_you_paused_does_not_wait_on_you_for_its_older_question() {
+        val yours = Mission(id = 6, name = "f", state = "paused", updatedAt = 400, waitingOn = MissionWait("question", since = 300))
+        val braked = Mission(id = 7, name = "g", state = "paused", updatedAt = 400, waitingOn = MissionWait("question", since = 400))
+        val active = Mission(id = 8, name = "h", state = "active", updatedAt = 400, waitingOn = MissionWait("question", since = 300))
+        assertEquals(listOf(8L, 7L), missionWaits(listOf(yours, braked, active)).map { it.id })
+        assertNull(yours.personWait)
+        val g = missionGroups(listOf(yours, braked), 500)
+        assertEquals(listOf(6L), g.paused.map { it.id }, "listed as paused, not as waiting")
     }
 }

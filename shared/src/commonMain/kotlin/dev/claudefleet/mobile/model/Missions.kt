@@ -51,6 +51,16 @@ data class MissionWait(
     @SerialName("open_cards") val openCards: Int = 0,
 )
 
+/**
+ * The wait that counts in Needs you (review w03-7): the hub's [Mission.waitingOn],
+ * except that a paused mission counts only for the brake's own card. A brake
+ * pauses the mission and asks at once, so its card is no older than the pause
+ * ([Mission.updatedAt]); a question already open when the person paused it
+ * (or pressed Pause all) waits for Resume, quietly.
+ */
+val Mission.personWait: MissionWait?
+    get() = waitingOn?.takeIf { state != "paused" || it.since >= updatedAt }
+
 /** "Waits on you · a question": a waiting mission's line, in words. */
 fun missionWaitLabel(w: MissionWait): String {
     val what = when (w.reason) {

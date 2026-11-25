@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.claudefleet.mobile.model.Mission
+import dev.claudefleet.mobile.model.personWait
 import dev.claudefleet.mobile.model.dollars
 import dev.claudefleet.mobile.model.relativeTime
 import dev.claudefleet.mobile.ui.components.ErrorBanner
@@ -277,7 +278,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.group(
     if (missions.isEmpty()) return
     item(key = "h-$title") { GroupHeading(title, missions.size) }
     items(missions, key = { "m-$title-${it.id}" }) { m ->
-        val wait = m.waitingOn
+        val wait = m.personWait
         Column {
             PhoneRow(
                 title = m.name.ifBlank { "Mission ${m.id}" },

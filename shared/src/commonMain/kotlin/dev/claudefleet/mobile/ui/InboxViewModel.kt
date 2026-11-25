@@ -6,6 +6,7 @@ import dev.claudefleet.mobile.model.Headroom
 import dev.claudefleet.mobile.model.HostLogin
 import dev.claudefleet.mobile.model.Mission
 import dev.claudefleet.mobile.model.MissionWait
+import dev.claudefleet.mobile.model.personWait
 import dev.claudefleet.mobile.model.GrantLevel
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.forAccount
@@ -119,10 +120,11 @@ fun inboxRowActions(
  * The missions waiting on a person (contract 15's `waiting_on`, the
  * desktop's `waitingOf`), the longest waiting first. The hub's `waiting_on`
  * decides: a mission a brake paused with an open question waits too, not
- * only an active one (review w09-1).
+ * only an active one (review w09-1) — but one a person paused only for the
+ * brake's own card ([personWait], review w03-7).
  */
 fun missionWaits(missions: List<Mission>): List<Mission> =
-    missions.filter { it.waitingOn != null }
+    missions.filter { it.personWait != null }
         .sortedWith(compareBy<Mission> { it.waitingOn?.since ?: 0 }.thenBy { it.id })
 
 /**
