@@ -373,7 +373,12 @@ class MissionsViewModel(
         }
         // The person went Back, picked another mission or closed the sheet
         // while the press ran: its read would pull them back into this one.
-        if (!here) return@launch
+        // Back on the same mission by another road (left and reopened): its
+        // read ran under the press, so it is read again, quietly (r5-09-7).
+        if (!here) {
+            if (local.value.detail?.mission?.id == id) readOne(id, quiet = true)
+            return@launch
+        }
         readOne(id)
     }
 

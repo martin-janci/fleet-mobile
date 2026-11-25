@@ -229,6 +229,11 @@ class SessionG55Test {
         assertEquals(tomorrowMorning(now, { 3_600 }) - 3_600, tomorrowMorning(now, spring))
         assertEquals(tomorrowMorning(now, { 7_200 }) + 3_600, tomorrowMorning(now, autumn))
         assertEquals(nextLocalClock(now, { 3_600 }, 20, 0) - 3_600, nextLocalClock(now, spring, 20, 0))
+        // r5-09-8: at 01:45 on the night the clock skips 02:00-03:00, "02:15" is 03:15 that night, not 01:15 or tomorrow.
+        val utcMidnight = now - now % 86_400
+        val skip = { t: Long -> if (t < utcMidnight + 3_600) 3_600 else 7_200 }
+        assertEquals(utcMidnight + 4_500, nextLocalClock(utcMidnight + 2_700, skip, 2, 15))
+        assertEquals(utcMidnight + 4_500, nextLocalClock(utcMidnight - 1_800, skip, 2, 15), "and from 00:30")
         // Before the change nothing moves.
         assertEquals(nextLocalClock(now, { 3_600 }, 11, 0), nextLocalClock(now, spring, 11, 0))
     }

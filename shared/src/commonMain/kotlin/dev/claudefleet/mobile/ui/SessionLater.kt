@@ -200,10 +200,14 @@ fun tomorrowMorning(now: Long, utcOffset: (Long) -> Int): Long =
  * [candidate] was counted from today's midnight at [now]'s UTC offset. Across
  * a clock change the offset at the candidate differs, and the wall clock it
  * names is that much off: corrected by the difference (once is enough for a
- * one-hour change).
+ * one-hour change). A time inside the hour a spring change skips corrects
+ * back across the change: there the uncorrected instant stands (02:15 is
+ * 03:15 that night, as the desktop's `setHours` has it).
  */
-private fun atLocalOffset(candidate: Long, now: Long, utcOffset: (Long) -> Int): Long =
-    candidate - (utcOffset(candidate) - utcOffset(now))
+private fun atLocalOffset(candidate: Long, now: Long, utcOffset: (Long) -> Int): Long {
+    val corrected = candidate - (utcOffset(candidate) - utcOffset(now))
+    return if (utcOffset(corrected) == utcOffset(candidate)) corrected else candidate
+}
 
 /**
  * What a choice sends: the time it holds the prompt until, or the limit

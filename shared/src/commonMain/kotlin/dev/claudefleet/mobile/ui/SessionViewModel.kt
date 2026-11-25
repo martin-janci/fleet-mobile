@@ -804,6 +804,9 @@ class SessionViewModel(
      */
     private var drawnStatus: String? = null
 
+    /** The conversation (`claude_session_id`) the screen is on, as far as it knows; null until a read or a frame says. */
+    private var seenClaude: String? = null
+
     /** The generation currently inside [fetchLock], fetching and applying. */
     private var running: Generation? = null
 
@@ -1011,15 +1014,22 @@ class SessionViewModel(
         // A `/clear` or a resume puts the session on another conversation
         // without moving its turn count: start over on it rather than append
         // under the old one (the desktop's `seenClaude`). Null is "not
-        // known" (a re-list's phone view leaves the column out), never a change.
+        // known" (a re-list's phone view leaves the column out), never a
+        // change. The baseline is the picker's current conversation, read at
+        // open ([loadConversations]): a re-listed row has no id until its next
+        // frame, and on an idle session that frame is the `/clear` itself.
         scope.launch {
             fleet.sessions
                 .map { rows -> rows.firstOrNull { it.id == sessionId }?.claudeSessionId }
                 .filterNotNull()
                 .distinctUntilChanged()
-                .drop(1)
-                .collect {
-                    startOver()
+                .collect { id ->
+                    val before = seenClaude
+                    seenClaude = id
+                    if (before == null || before == id) return@collect
+                    // Under the lock: a read in flight is of the old
+                    // conversation, and applies before the screen is wiped.
+                    fetchLock.withLock { startOver() }
                     requestRead(first = true)
                 }
         }
@@ -2135,6 +2145,8 @@ class SessionViewModel(
         try {
             val list = actions.conversations(sessionId)
             local.update { it.copy(conversations = list) }
+            // The baseline a later row frame is compared with, where none is known yet.
+            if (seenClaude == null) seenClaude = list.firstOrNull { it.current }?.claudeSessionId
         } catch (e: CancellationException) {
             throw e
         } catch (_: Throwable) {
@@ -2575,7 +2587,8 @@ class SessionViewModel(
                 // every time. Null on the first read, which is the full
                 // window — and `appending` folds a narrower one the same way,
                 // since it is still a tail whose head overlaps what is held.
-                val fresh = actions.conversation(sessionId, sinceTurn = drawnTurnSeq)
+                val since = drawnTurnSeq
+                val fresh = actions.conversation(sessionId, sinceTurn = since)
                 // Stamped from the row as it is NOW, inside the lock and
                 // before the apply: the read reflects whatever the hub had
                 // when it answered, and a turn that completes after this
@@ -2583,7 +2596,7 @@ class SessionViewModel(
                 drawnTurnSeq = row()?.turnSeq
                 drawnStatus = row()?.claudeStatus
                 local.update { current ->
-                    val appended = current.conversation.appending(fresh)
+                    val appended = current.conversation.appending(fresh, narrowed = since != null)
                     // The same "did the tail move" signal `SessionScreen`'s
                     // own auto-scroll effect keys on: turn count alone misses
                     // the ordinary case of the live turn growing new items
