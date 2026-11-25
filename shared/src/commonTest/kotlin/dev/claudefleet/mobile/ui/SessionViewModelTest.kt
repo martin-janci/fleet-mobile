@@ -1618,6 +1618,72 @@ class SessionViewModelTest {
         assertEquals(listOf<String?>("new"), vm.state.value.conversation.turns.map { it.prompt })
     }
 
+    /**
+     * r5-09-1: a re-listed row has no `claude_session_id`, and an idle session
+     * sends no frame, so the first id the row carries is the `/clear`'s own.
+     * The baseline is the picker's current conversation, read at open.
+     */
+    @Test
+    fun a_clear_on_an_idle_session_opened_from_a_relisted_row_is_followed() = runTest {
+        val actions = FakeActions()
+        actions.answer = Conversation(listOf(turn("t1", "old")))
+        actions.conversationList = listOf(ConversationSummary(claudeSessionId = "a", current = true))
+        val fleet = FakeFleetState(listOf(row(status = "idle", turnSeq = 3)), tools = setOf(HubCapabilities.SESSION_CONVERSATIONS))
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        vm.load().join()
+        runCurrent()
+
+        fleet.sessions.value = listOf(row(status = "idle", turnSeq = 3).copy(claudeSessionId = "a"))
+        runCurrent()
+        assertEquals(1, actions.reads, "the same conversation: nothing to start over")
+
+        actions.answer = Conversation(listOf(turn("t2", "new")))
+        fleet.sessions.value = listOf(row(status = "idle", turnSeq = 3).copy(claudeSessionId = "b"))
+        runCurrent()
+        assertEquals(listOf<String?>("new"), vm.state.value.conversation.turns.map { it.prompt })
+    }
+
+    /** r5-09-1, the scenario itself: the row's first id is already the new conversation's. */
+    @Test
+    fun the_first_id_a_row_carries_is_compared_with_the_conversation_read_at_open() = runTest {
+        val actions = FakeActions()
+        actions.answer = Conversation(listOf(turn("t1", "old")))
+        actions.conversationList = listOf(ConversationSummary(claudeSessionId = "a", current = true))
+        val fleet = FakeFleetState(listOf(row(status = "idle", turnSeq = 3)), tools = setOf(HubCapabilities.SESSION_CONVERSATIONS))
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        vm.load().join()
+        runCurrent()
+
+        actions.answer = Conversation(listOf(turn("t2", "new")))
+        fleet.sessions.value = listOf(row(status = "idle", turnSeq = 3).copy(claudeSessionId = "b"))
+        runCurrent()
+        assertEquals(listOf<String?>("new"), vm.state.value.conversation.turns.map { it.prompt })
+        assertEquals(listOf<Long?>(null, null), actions.cursors)
+    }
+
+    /** r5-09-4: a read in flight when the conversation changes applies first and is then wiped, not the other way round. */
+    @Test
+    fun a_read_in_flight_does_not_put_the_cleared_conversation_back() = runTest {
+        val actions = FakeActions()
+        actions.answer = Conversation(listOf(turn("t1", "old")))
+        val fleet = FakeFleetState(listOf(row(status = "idle", turnSeq = 3).copy(claudeSessionId = "a")))
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        vm.load().join()
+        runCurrent()
+
+        val gate = actions.queueRead(Conversation(listOf(turn("t1", "old"), turn("t1b", "old too"))))
+        vm.refresh()
+        runCurrent()
+        actions.answer = Conversation(listOf(turn("t2", "new")))
+        fleet.sessions.value = listOf(row(status = "idle", turnSeq = 3).copy(claudeSessionId = "b"))
+        runCurrent()
+        gate.complete(Unit)
+        runCurrent()
+
+        assertEquals(listOf<String?>("new"), vm.state.value.conversation.turns.map { it.prompt })
+        assertEquals(null, actions.cursors.last(), "the read after the wipe is a full window")
+    }
+
     /** A completed turn is news on any status. */
     @Test
     fun a_completed_turn_refetches_even_on_a_settled_session() = runTest {

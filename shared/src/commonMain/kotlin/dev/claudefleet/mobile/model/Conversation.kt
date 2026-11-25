@@ -65,8 +65,13 @@ data class ConvContext(
  * When the windows do not overlap at all, both are kept in order and nothing is
  * invented to bridge them. [Conversation.truncated] is how the screen says there
  * may be a gap, and once set it stays set.
+ *
+ * [narrowed] says the read asked for the turns since one already drawn
+ * (`since_turn`): the hub then marks the window `truncated` for the turns it
+ * left out on purpose, which is no gap unless the byte tail cut the window's
+ * own first turn.
  */
-fun Conversation.appending(fresh: Conversation): Conversation {
+fun Conversation.appending(fresh: Conversation, narrowed: Boolean = false): Conversation {
     // An empty read says nothing at all, including about truncation. `this` is
     // already inside the ceiling — every conversation on a screen got there
     // through this function — so it needs no second look.
@@ -77,24 +82,22 @@ fun Conversation.appending(fresh: Conversation): Conversation {
     // merged is one that an opening screen walks straight past.
     if (turns.isEmpty()) return fresh.withinCeiling()
 
-    // The running turn again, cut by the hub's read tail (w10-1). A caught-up
-    // phone asks for one turn; once that turn's transcript outgrows the tail
-    // its prompt entry is no longer read, so the hub answers a prompt-less
-    // turn stamped with the first assistant entry still in the tail — a stamp
-    // that moves on every read. It is the held last turn, not a new one, when
-    // that entry lies inside the held turn's own span: the held turn keeps
-    // its prompt and takes the fresher items, and whatever the window holds
-    // after it follows on with no gap.
-    val last = turns.last()
+    // A turn again, cut by the hub's read tail (w10-1). A caught-up phone
+    // asks for one turn (two once a turn ended); when what it asks for
+    // outgrows the tail, the window's first turn arrives without its prompt,
+    // stamped with the first assistant entry still in the tail — a stamp that
+    // moves on every read. It is a held turn, not a new one, when that entry
+    // lies inside a held prompted turn's span: the cut copy is given that
+    // turn's head (prompt, `at`) and the ordinary splice below then matches
+    // it. Unchanged since it was held, the held items stay: they reach
+    // further back than the tail does.
     val cut = fresh.turns.first().takeIf { it.isTailCut() }
-    if (cut != null && !last.isTailCut() && cut.startedInside(last)) {
-        val merged = copy(
-            turns = turns.dropLast(1) + last.copy(items = cut.items, endedAt = cut.endedAt ?: last.endedAt),
-            context = fresh.context ?: context,
-            events = fresh.events.ifEmpty { events },
-        )
-        val rest = fresh.turns.drop(1)
-        return if (rest.isEmpty()) merged else merged.appending(fresh.copy(turns = rest, truncated = false))
+    if (cut != null) {
+        val h = turns.lastOrNull { (it.prompt != null || it.promptUuid != null) && cut.startedInside(it) }
+        if (h != null) {
+            val headed = h.copy(items = if (cut.endedAt == h.endedAt) h.items else cut.items, endedAt = cut.endedAt ?: h.endedAt)
+            return appending(fresh.copy(turns = listOf(headed) + fresh.turns.drop(1)), narrowed)
+        }
     }
 
     val held = turns.map { it.identity() }
@@ -140,7 +143,12 @@ fun Conversation.appending(fresh: Conversation): Conversation {
     // instead of a certain duplicate, and it is a trade rather than a fix.
     val kept = if (overlap == 0) {
         val arrivedIdentities = arrived.toSet()
-        turns.filterIndexed { index, _ -> held[index] !in arrivedIdentities }
+        // Tail-cut turns share one identity: only the held LAST one can be an
+        // earlier copy of what arrived. One further up is another turn's
+        // remains and stays (r5-09-5).
+        turns.filterIndexed { index, turn ->
+            held[index] !in arrivedIdentities || (turn.isTailCut() && index != turns.lastIndex)
+        }
     } else {
         turns.subList(0, turns.size - overlap)
     }
@@ -149,8 +157,9 @@ fun Conversation.appending(fresh: Conversation): Conversation {
         // With an overlap the held head already covers what the hub's
         // narrower window dropped (a `since_turn` read is one turn and says
         // `truncated` whenever the conversation has more): only a real gap
-        // adds the flag (w10-2).
-        truncated = truncated || (overlap == 0 && fresh.truncated),
+        // adds the flag (w10-2). A narrowed read that overlaps nothing is the
+        // next turn alone, a gap only when its own head was cut (r5-09-2).
+        truncated = truncated || (overlap == 0 && fresh.truncated && (!narrowed || fresh.turns.first().isTailCut())),
         // Both a rolling-window read like `turns` itself, not a ledger: the
         // freshest read's own picture replaces the held one rather than being
         // merged into it, and falls back to what was already held only when
@@ -211,7 +220,11 @@ private fun Conversation.withinCeiling(): Conversation =
  */
 private fun ConvTurn.identity(): Pair<String?, String?> = if (isTailCut()) null to null else at to prompt
 
-/** This cut turn's first surviving entry is stamped within [held]'s span (ISO stamps of one transcript compare as text). */
+/**
+ * This cut turn's first surviving entry is stamped within [held]'s span as
+ * held (ISO stamps of one transcript compare as text). Nothing looser: an
+ * entry after the held end may belong to a turn the screen never held.
+ */
 private fun ConvTurn.startedInside(held: ConvTurn): Boolean {
     val first = at ?: return false
     val from = held.at ?: return false
