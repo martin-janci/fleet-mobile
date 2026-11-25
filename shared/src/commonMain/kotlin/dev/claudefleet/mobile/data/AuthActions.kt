@@ -6,8 +6,9 @@ import kotlinx.coroutines.flow.StateFlow
 /**
  * Everything a screen may do to this device's credential, and nothing else.
  *
- * Two methods: buy a credential with a pairing code, and drop the one we hold.
- * **There is deliberately no third.** The tool that cancels a token for good is
+ * Two methods: buy a credential with a pairing code, and drop the one we hold
+ * — and one that only re-points it, [moveHub]. **There is deliberately no
+ * method that cancels one.** The tool that cancels a token for good is
  * not one a client token may call — it is fleet administration, which
  * `mcp/guard.rs` reserves for the master — and cancelling is the operator's,
  * from the hub. So the Settings screen cannot offer it, and the reason it
@@ -61,4 +62,13 @@ interface AuthActions {
      * otherwise would be the more dangerous of the two lies.
      */
     suspend fun forget()
+
+    /**
+     * Point this device's credential at the hub's new address, checked first
+     * with the same token and fleet id (review w18-9). Not a new credential:
+     * the hub's row for this device is the same one, so it reaches nothing
+     * the two above do not. Throws [HubMoveRefused] and changes nothing when
+     * the address is not this hub.
+     */
+    suspend fun moveHub(address: String): Credentials = throw HubMoveRefused(HubMoveRefused.NOT_PAIRED)
 }

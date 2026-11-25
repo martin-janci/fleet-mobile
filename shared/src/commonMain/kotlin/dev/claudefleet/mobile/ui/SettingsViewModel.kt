@@ -38,6 +38,10 @@ data class SettingsUiState(
     val hubVersion: String = "",
     val forgetting: Boolean = false,
     val error: String? = null,
+    /** Hub address: the new address is being checked (review w18-9). */
+    val moving: Boolean = false,
+    /** Hub address: why the new address was refused; null when it was not. */
+    val moveError: String? = null,
 ) {
     /**
      * The same question [Credentials.canWrite] asks, answered by the same rule.
@@ -102,6 +106,8 @@ class SettingsViewModel(
         val forgetting: Boolean = false,
         val error: String? = null,
         val hubVersion: String = "",
+        val moving: Boolean = false,
+        val moveError: String? = null,
     )
 
     private val local = MutableStateFlow(Local())
@@ -137,6 +143,31 @@ class SettingsViewModel(
         } catch (t: Throwable) {
             local.update { it.copy(forgetting = false, error = explain(t)) }
         }
+    }
+
+    /**
+     * Point this phone at the hub's new [address] (review w18-9), kept only
+     * once it answers with this phone's token and fleet. True when it was
+     * kept; a refusal is said under the field and changes nothing.
+     */
+    suspend fun moveHub(address: String): Boolean {
+        if (local.value.moving) return false
+        local.update { it.copy(moving = true, moveError = null) }
+        return try {
+            auth.moveHub(address)
+            local.update { it.copy(moving = false, moveError = null) }
+            true
+        } catch (e: CancellationException) {
+            local.update { it.copy(moving = false) }
+            throw e
+        } catch (t: Throwable) {
+            local.update { it.copy(moving = false, moveError = explain(t)) }
+            false
+        }
+    }
+
+    fun dismissMoveError() {
+        local.update { it.copy(moveError = null) }
     }
 
     fun dismissError() {
@@ -190,6 +221,8 @@ class SettingsViewModel(
             hubVersion = if (credentials == null) "" else l.hubVersion,
             forgetting = l.forgetting,
             error = l.error,
+            moving = l.moving,
+            moveError = l.moveError,
         )
     }
 }

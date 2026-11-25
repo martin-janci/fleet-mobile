@@ -275,7 +275,7 @@ fun buildThreads(
         val h = missionReceipts[id]
         val m = missionById[id]
         val state = m?.state ?: h?.missionState ?: "draft"
-        val wait = m?.waitingOn?.takeIf { !missionFinal(state) }
+        val wait = m?.personWait?.takeIf { !missionFinal(state) }
         val line = when {
             wait != null -> threadWaitWords(wait.reason)
             m != null && m.total > 0 -> "Mission · ${m.done} of ${m.total} done"

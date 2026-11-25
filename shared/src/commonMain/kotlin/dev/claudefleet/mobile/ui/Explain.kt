@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.ui
 
+import dev.claudefleet.mobile.data.HubMoveRefused
 import dev.claudefleet.mobile.data.NotAPairingCode
 import dev.claudefleet.mobile.net.HubError
 import dev.claudefleet.mobile.store.SecretsUnavailable
@@ -30,6 +31,8 @@ internal fun explain(t: Throwable): String = when (t) {
     is HubError -> t.message ?: FALLBACK
     is NotAPairingCode -> t.message ?: FALLBACK
     is SecretsUnavailable -> t.message ?: FALLBACK
+    // Its own constants, which repeat neither the address nor the hub's answer.
+    is HubMoveRefused -> t.message ?: FALLBACK
     else -> "$FALLBACK (${t::class.simpleName ?: "failure"})"
 }
 

@@ -35,6 +35,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -47,6 +48,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.LifecycleResumeEffect
+import kotlinx.coroutines.launch
 import dev.claudefleet.mobile.model.Page
 import dev.claudefleet.mobile.model.inWords
 import dev.claudefleet.mobile.notify.NOTIFY_PHONE
@@ -116,6 +118,9 @@ class OrbitSettingsHandlers(
     /** The fingerprint lock's switch; null where the phone cannot ask for one, and the row is not drawn. */
     val onSetLock: ((Boolean) -> Unit)? = null,
     val onForget: () -> Unit = {},
+    /** Hub address: check the new address and keep it; true when kept (review w18-9). Null: no row. */
+    val onMoveHub: (suspend (String) -> Boolean)? = null,
+    val onDismissMoveError: () -> Unit = {},
     val onDismissError: () -> Unit = {},
     /** The Usage screen; null where the hub reports neither usage nor accounts. */
     val onOpenUsage: (() -> Unit)? = null,
@@ -414,6 +419,7 @@ private fun ColumnScope.SettingsGroupPage(group: SettingsGroup, input: OrbitSett
     when (group) {
         SettingsGroup.GENERAL -> {
             KeyValue("Hub", s.hub)
+            handlers.onMoveHub?.let { HubAddress(s, it, handlers.onDismissMoveError) }
             KeyValue("Client name", s.clientName)
             KeyValue(
                 "Access",
@@ -671,6 +677,59 @@ private fun KeyValue(label: String, value: String) {
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = OrbitTokens.spacing("phone-gutter").dp, vertical = 8.dp)) {
         Text(label, style = Fleet.type.textSm, color = o.fgMuted)
         Text(value.ifBlank { "—" }, style = Fleet.type.textMd, color = o.fg, maxLines = 2, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/**
+ * Hub address (review w18-9): the hub moved — a new lease, a new domain, http
+ * to https — and this phone follows it without a new pairing, so the hub's
+ * row for it (trust, person, mode) carries on. Kept only once the new
+ * address accepts this phone's token and names the same fleet.
+ */
+@Composable
+private fun HubAddress(s: SettingsUiState, onMove: suspend (String) -> Boolean, onDismissError: () -> Unit) {
+    val o = Fleet.colors
+    var editing by remember { mutableStateOf(false) }
+    var text by remember(s.hub) { mutableStateOf(s.hub) }
+    val scope = rememberCoroutineScope()
+    ActionRow(
+        title = "Hub address",
+        line = "The hub moved? Point this phone at its new address. Its token and access stay.",
+        action = "Change",
+        enabled = s.hub.isNotBlank() && !s.moving,
+        onClick = { text = s.hub; onDismissError(); editing = true },
+    )
+    if (editing) {
+        AlertDialog(
+            onDismissRequest = { if (!s.moving) editing = false },
+            title = { Text("Hub address") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = text,
+                        onValueChange = { text = it; if (s.moveError != null) onDismissError() },
+                        singleLine = true,
+                        enabled = !s.moving,
+                        label = { Text("New address") },
+                        isError = s.moveError != null,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                    )
+                    Text(
+                        s.moveError ?: "Checked with this phone's token before it is kept: it must be the same fleet.",
+                        style = Fleet.type.textSm,
+                        color = if (s.moveError != null) o.danger else o.fgMuted,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = { scope.launch { if (onMove(text)) editing = false } },
+                    enabled = !s.moving && text.isNotBlank() && text.trim() != s.hub,
+                ) { Text(if (s.moving) "Checking…" else "Save") }
+            },
+            dismissButton = { TextButton(onClick = { editing = false }, enabled = !s.moving) { Text("Cancel") } },
+        )
     }
 }
 

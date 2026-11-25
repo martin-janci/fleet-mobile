@@ -112,6 +112,21 @@ class IosAlertPoster(private val hub: () -> String?) : AlertPoster {
         )
     }
 
+    /** Quiet hours ended (review w11-12): one notification for the sessions they held that still wait; a tap opens the app. */
+    override fun postQuietSummary(count: Int) {
+        val content = UNMutableNotificationContent().apply {
+            setTitle(quietSummaryTitle(count))
+            setBody(QUIET_SUMMARY_TEXT)
+            setThreadIdentifier(NEEDS_YOU_THREAD)
+            hub()?.let { setUserInfo(mapOf<Any?, Any?>(HUB_KEY to it)) }
+            setSound(UNNotificationSound.defaultSound)
+        }
+        center.addNotificationRequest(
+            UNNotificationRequest.requestWithIdentifier("${NEEDS_YOU_ID_PREFIX}quiet-summary", content, null),
+            withCompletionHandler = null,
+        )
+    }
+
     override fun withdrawMission(missionId: Long) {
         center.removeDeliveredNotificationsWithIdentifiers(listOf("${NEEDS_YOU_ID_PREFIX}mission-$missionId"))
     }

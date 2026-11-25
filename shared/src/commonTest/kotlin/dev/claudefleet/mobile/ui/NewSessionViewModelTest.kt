@@ -94,6 +94,18 @@ class NewSessionViewModelTest {
         callScope: kotlinx.coroutines.CoroutineScope = scope,
     ) = NewSessionViewModel(fleet, actions, scope, canWrite, initialHost, onCreated = { opened += it }, callScope = callScope)
 
+    /** Review w17-7: what was typed comes back after the process was killed; a field typed since wins. */
+    @Test
+    fun typed_fields_come_back_after_the_process_was_killed() = runTest {
+        val vm = vm(FakeFleetForNew(listOf(PINE)), scope = backgroundScope)
+        vm.onFriendlyNameChange("mine")
+        vm.restoreTyped(firstMessage = "fix the login", branch = "fix/login", friendlyName = "saved")
+        runCurrent()
+        assertEquals("fix the login", vm.state.value.firstMessage)
+        assertEquals("fix/login", vm.state.value.branch)
+        assertEquals("mine", vm.state.value.friendlyName)
+    }
+
     @Test
     fun unreachable_hosts_are_offered_but_cannot_be_chosen() = runTest {
         val vm = vm(FakeFleetForNew(listOf(PINE, DOWN, BOX)), scope = backgroundScope)

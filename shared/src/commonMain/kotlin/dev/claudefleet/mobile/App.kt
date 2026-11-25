@@ -29,6 +29,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -699,7 +700,7 @@ class AppContainer(
     // way. See `withHubTimeouts()`.
     private val http: HttpClient = http.withHubTimeouts()
 
-    val session: AppSession = AppSession(secrets, http)
+    val session: AppSession = AppSession(secrets, http, prefs)
 
     /** The two calls a session screen may make, through the 401 rule. */
     val sessionActions: SessionActions = HubSessionActions(session)
@@ -865,6 +866,8 @@ class AppContainer(
             // The notifier's matrix and quiet hours, kept for the watcher
             // whether or not a screen is up (reviews w11-4, w13-1).
             onFleetSettings = { prefs.writeFleetNotify(it) },
+            // Which fleet this address answers for, for a later Hub address change (review w18-9).
+            onFleetId = { id -> session.fleetSeen(credentials.hub, id) },
             // An operator changed this device's mode since it paired (review w18-2).
             onMode = { mode -> session.modeListed(mode, held = credentials) },
         )
@@ -1405,7 +1408,12 @@ private fun FleetRoute(
     // (written back from `tools/list`) must not drop the person to the root
     // tab (review r5-08-6). The repository and the view models stay keyed on
     // the credential, so the new mode reaches them.
-    val nav = remember(credentials.hub, credentials.token) { Navigator() }
+    // The screen comes back after Android killed the process in the
+    // background (review w17-7): the platform's saved state, so a fresh
+    // launch still starts on the first tab. No secret is in it.
+    var savedNav by rememberSaveable(credentials.hub, credentials.token.hashCode()) { mutableStateOf("") }
+    val nav = remember(credentials.hub, credentials.token) { Navigator().also { if (savedNav.isNotEmpty()) it.restore(savedNav) } }
+    LaunchedEffect(nav) { nav.screen.collect { savedNav = nav.saved() } }
     val screen by nav.screen.collectAsState()
     val tab by nav.tab.collectAsState()
     // The first import after a pair (14.12): set as the fleet check ends, on the New bar only.
@@ -2865,6 +2873,8 @@ private fun SettingsRoute(
                 null
             },
             onForget = { settings.forget() },
+            onMoveHub = settings::moveHub,
+            onDismissMoveError = settings::dismissMoveError,
             onDismissError = settings::dismissError,
             onOpenUsage = onOpenUsage,
             onOpenCompany = onOpenCompany,
@@ -2929,6 +2939,19 @@ private fun NewSessionRoute(
     }
     val state by vm.state.collectAsState()
     LaunchedEffect(vm, initialProject) { initialProject?.let(vm::selectProject) }
+    // What was typed comes back after Android killed the process (review
+    // w17-7): read before the first SideEffect below writes this form's own.
+    var typedMessage by rememberSaveable { mutableStateOf("") }
+    var typedBranch by rememberSaveable { mutableStateOf("") }
+    var typedName by rememberSaveable { mutableStateOf("") }
+    val restored = remember(vm) { Triple(typedMessage, typedBranch, typedName) }
+    LaunchedEffect(vm) { vm.restoreTyped(restored.first, restored.second, restored.third) }
+    SideEffect {
+        // A saved state has a size limit; a paste past this is not kept.
+        typedMessage = state.firstMessage.takeIf { it.length <= 16_000 }.orEmpty()
+        typedBranch = state.branch
+        typedName = state.friendlyName
+    }
     // The wizard step lives here so its back gesture is one of
     // `App`'s handlers: on Project or Review it goes one step back; on Where
     // (and while a start runs, which is safe to leave) `nav.back()` leaves.

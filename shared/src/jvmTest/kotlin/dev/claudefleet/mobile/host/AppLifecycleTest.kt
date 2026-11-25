@@ -200,6 +200,17 @@ class AppLifecycleTest {
     }
 
     /**
+     * Quiet hours end at no event (review w11-12): the service holds what they
+     * held back and looks each minute whether to say it in one summary.
+     */
+    @Test
+    fun the_service_holds_quiet_alerts_and_sums_them_up_after() {
+        val collect = service.substringAfter("is NeedsYouAlert ->", "").substringBefore("is NeedsYouResolved")
+        assertTrue("heldByQuietHours(event.reason, minute) -> container.prefs.holdForQuiet(event.sessionId)" in collect)
+        assertTrue("container.prefs.quietSummaryDue(seen)" in service && "postQuietSummary(count)" in service)
+    }
+
+    /**
      * A notification left up from an earlier pairing must not open, or
      * retry, the same id on another hub (review w16-1): every tap carries its
      * hub, the activity hands it on, and turning "Notify me" off or losing

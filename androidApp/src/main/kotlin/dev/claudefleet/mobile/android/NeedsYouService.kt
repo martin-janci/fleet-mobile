@@ -36,6 +36,12 @@ import dev.claudefleet.mobile.notify.decodeSeen
 import dev.claudefleet.mobile.notify.encodeSeen
 import dev.claudefleet.mobile.notify.needsYouEvents
 import dev.claudefleet.mobile.notify.notifyAllows
+import dev.claudefleet.mobile.notify.heldByQuietHours
+import dev.claudefleet.mobile.notify.holdForQuiet
+import dev.claudefleet.mobile.notify.localMinuteOfDay
+import dev.claudefleet.mobile.notify.quietSummaryDue
+import dev.claudefleet.mobile.notify.quietSummaryTitle
+import dev.claudefleet.mobile.notify.QUIET_SUMMARY_TEXT
 import dev.claudefleet.mobile.notify.androidNotificationsNote
 import dev.claudefleet.mobile.notify.watchingNotice
 import dev.claudefleet.mobile.store.Credentials
@@ -182,6 +188,16 @@ class NeedsYouService : Service() {
         }
         launch { watchRoutines(HubClient(http, credentials.hub, credentials.token), container) }
         launch { watchMissions(HubClient(http, credentials.hub, credentials.token), container) }
+        // Quiet hours end at no event of their own: look each minute whether
+        // what they held still waits, and say it once (review w11-12).
+        launch {
+            while (true) {
+                delay(QUIET_LOOK_MS)
+                val seen = memory.getStringSet(SEEN, null)?.let { decodeSeen(it.toList()) } ?: continue
+                val count = container.prefs.quietSummaryDue(seen) ?: continue
+                if (!AppVisibility.foreground) postQuietSummary(count)
+            }
+        }
         val remembered = memory.getStringSet(SEEN, null)?.let { decodeSeen(it.toList()) }
         needsYouEvents(fleet, remembered) { seen -> memory.edit().putStringSet(SEEN, encodeSeen(seen).toSet()).apply() }
             .collect { event ->
@@ -189,7 +205,14 @@ class NeedsYouService : Service() {
                     // On screen, the app already shows it: no second word for it.
                     // A kind turned off on This phone is not posted; read
                     // each time, so a switch flipped in the app counts now.
-                    is NeedsYouAlert -> if (!AppVisibility.foreground && container.prefs.notifyAllows(event.reason)) post(event)
+                    is NeedsYouAlert -> if (!AppVisibility.foreground) {
+                        val minute = localMinuteOfDay()
+                        when {
+                            container.prefs.notifyAllows(event.reason, minute) -> post(event)
+                            // Held by quiet hours: said in the summary when they end.
+                            container.prefs.heldByQuietHours(event.reason, minute) -> container.prefs.holdForQuiet(event.sessionId)
+                        }
+                    }
                     // Answered here or elsewhere: it no longer needs saying.
                     is NeedsYouResolved -> withdraw(event.sessionId)
                 }
@@ -327,6 +350,24 @@ class NeedsYouService : Service() {
         manager(this).notify(TAG_SESSION, alertId(alert.sessionId), n)
         shown[alert.sessionId] = "${c.title} — ${alert.text}"
         summarize()
+    }
+
+    /**
+     * Quiet hours ended with [count] held sessions still waiting (review
+     * w11-12): one notification of its own that opens the app.
+     */
+    private fun postQuietSummary(count: Int) {
+        val n = NotificationCompat.Builder(this, ALERTS)
+            .setSmallIcon(R.drawable.ic_notify)
+            .setContentTitle(quietSummaryTitle(count))
+            .setContentText(QUIET_SUMMARY_TEXT)
+            .setAutoCancel(true)
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setContentIntent(PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE))
+            .build()
+        manager(this).notify(QUIET_SUMMARY_ID, n)
     }
 
     /**
@@ -492,6 +533,8 @@ class NeedsYouService : Service() {
         private const val ONGOING_ID = 1
         private const val ALERT_BASE = 1_000
         private const val SUMMARY_ID = 2
+        private const val QUIET_SUMMARY_ID = 3
+        private const val QUIET_LOOK_MS = 60_000L
         private const val ROUTINE_BASE = 200_000
         private const val MISSION_BASE = 300_000
         private const val ROUTINE_POLL_MS = 60_000L

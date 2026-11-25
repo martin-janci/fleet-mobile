@@ -25,6 +25,9 @@ interface AlertPoster {
     /** The mission no longer waits: its notification comes down (review w21-3). */
     fun withdrawMission(missionId: Long) {}
 
+    /** Quiet hours ended with [count] held sessions still waiting: one summary for them (review w11-12). */
+    fun postQuietSummary(count: Int) {}
+
     /** Every alert up: they belong to another hub (review w16-1). */
     fun withdrawAll() {}
 }
@@ -66,6 +69,7 @@ fun Prefs.keepSeenForHub(hub: String): Boolean {
     putStringList(NEEDS_YOU_SEEN, emptyList())
     putStringList(ROUTINE_FAILED_SEEN, emptyList())
     putStringList(MISSION_WAIT_SEEN, emptyList())
+    putStringList(QUIET_HELD_PREF, emptyList())
     return true
 }
 
@@ -139,8 +143,17 @@ class NeedsYouCheck(
             // The kinds This phone turned off, and those the fleet's matrix or
             // quiet hours hold back, are still remembered as seen, so turning
             // one back on (or quiet hours ending) does not replay them.
-            alerts.filter { prefs.notifyAllows(it.reason) }.forEach(poster::post)
+            // Read once, so an alert is posted, held or dropped by one clock.
+            val minute = localMinuteOfDay()
+            for (alert in alerts) {
+                when {
+                    prefs.notifyAllows(alert.reason, minute) -> poster.post(alert)
+                    prefs.heldByQuietHours(alert.reason, minute) -> prefs.holdForQuiet(alert.sessionId)
+                }
+            }
             before.filter { (id, reason) -> reason != null && after[id] == null }.keys.forEach(poster::withdraw)
+            // Quiet hours over: one word for what they held that still waits (review w11-12).
+            prefs.quietSummaryDue(after, minute)?.let(poster::postQuietSummary)
         }
         prefs.writeSeen(after)
     }
