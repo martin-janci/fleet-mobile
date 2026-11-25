@@ -699,7 +699,7 @@ class AppContainer(
     // way. See `withHubTimeouts()`.
     private val http: HttpClient = http.withHubTimeouts()
 
-    val session: AppSession = AppSession(secrets, http)
+    val session: AppSession = AppSession(secrets, http, prefs)
 
     /** The two calls a session screen may make, through the 401 rule. */
     val sessionActions: SessionActions = HubSessionActions(session)
@@ -865,6 +865,8 @@ class AppContainer(
             // The notifier's matrix and quiet hours, kept for the watcher
             // whether or not a screen is up (reviews w11-4, w13-1).
             onFleetSettings = { prefs.writeFleetNotify(it) },
+            // Which fleet this address answers for, for a later Hub address change (review w18-9).
+            onFleetId = { id -> session.fleetSeen(credentials.hub, id) },
             // An operator changed this device's mode since it paired (review w18-2).
             onMode = { mode -> session.modeListed(mode, held = credentials) },
         )
@@ -2865,6 +2867,8 @@ private fun SettingsRoute(
                 null
             },
             onForget = { settings.forget() },
+            onMoveHub = settings::moveHub,
+            onDismissMoveError = settings::dismissMoveError,
             onDismissError = settings::dismissError,
             onOpenUsage = onOpenUsage,
             onOpenCompany = onOpenCompany,

@@ -228,6 +228,12 @@ sealed interface HubEvent {
          * hub that cannot resume at all, both mean re-list.
          */
         val resumed: Boolean? = null,
+        /**
+         * This fleet's id, or null before the hub has minted one (and from a
+         * hub that does not send it). Two addresses that answer with one id
+         * are one hub: what Settings' Hub address checks (review w18-9).
+         */
+        val fleetId: String? = null,
     ) : HubEvent
 
     /**
@@ -293,6 +299,7 @@ internal fun frameToEvent(frame: SseFrame): HubEvent? {
             // fallback for both is the device's own clock.
             now = (fields["now"] as? JsonPrimitive)?.content?.toLongOrNull(),
             resumed = (fields["resumed"] as? JsonPrimitive)?.content?.toBooleanStrictOrNull(),
+            fleetId = fields.text("fleet_id")?.takeIf { it.isNotBlank() },
         )
         LAGGED -> HubEvent.Lagged(
             fields["skipped"]?.let { runCatching { (it as JsonPrimitive).long }.getOrNull() } ?: 0L,

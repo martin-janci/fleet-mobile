@@ -139,6 +139,8 @@ class FleetRepository(
      * in a pocket, with no screen composed (reviews w11-4, w13-1).
      */
     private val onFleetSettings: (Map<String, String>) -> Unit = {},
+    /** The fleet id each `ready` names, kept so Settings' Hub address can tell this fleet from another (review w18-9). */
+    private val onFleetId: (String) -> Unit = {},
     /**
      * The device mode this connection's `tools/list` shows ([listedMode]): an
      * operator may change it after pairing, and no frame says so (review w18-2).
@@ -505,6 +507,7 @@ class FleetRepository(
                             // screen may want to name, and this is the only
                             // frame that carries it.
                             _hubVersion.value = event.version
+                            event.fleetId?.let(onFleetId)
                             val refusal = contractVerdict(event.contract).sentence()
                             if (refusal != null) {
                                 // Not a transport failure — the hub answered

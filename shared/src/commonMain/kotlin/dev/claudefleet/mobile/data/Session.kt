@@ -2,10 +2,19 @@ package dev.claudefleet.mobile.data
 
 import dev.claudefleet.mobile.net.HubClient
 import dev.claudefleet.mobile.net.HubError
+import dev.claudefleet.mobile.net.HubEvent
+import dev.claudefleet.mobile.net.HubEventStream
+import dev.claudefleet.mobile.store.Prefs
 import dev.claudefleet.mobile.store.Credentials
 import dev.claudefleet.mobile.store.Secrets
 import dev.claudefleet.mobile.store.SecretsUnavailable
 import io.ktor.client.HttpClient
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.filterIsInstance
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -51,6 +60,23 @@ class CredentialNotKept(reason: String?) : SecretsUnavailable(
     },
 )
 
+/**
+ * Settings' Hub address refused the new address, and nothing was changed
+ * (review w18-9). Its message is one of the constants below, written for a
+ * person: it never repeats the address or anything the hub answered.
+ */
+class HubMoveRefused(message: String) : Exception(message) {
+    companion object {
+        const val NOT_PAIRED: String = "this phone is not paired with a hub."
+        const val NOT_AN_ADDRESS: String =
+            "that is not a hub address. It starts http:// or https://, with no user@ in it. Nothing was changed."
+        const val TOKEN_REFUSED: String =
+            "the hub at that address does not accept this phone's token, so it is not the hub this phone is paired with. Nothing was changed."
+        const val ANOTHER_FLEET: String =
+            "that address answers for another fleet, not the one this phone is paired with. Nothing was changed."
+    }
+}
+
 /** Whether this device holds a credential for a hub. */
 sealed class AuthState {
     /** The store has not been read yet — the state at a cold start. */
@@ -82,6 +108,10 @@ sealed class AuthState {
 class AppSession(
     private val secrets: Secrets,
     private val http: HttpClient,
+    /** Where the fleet id the hub last named is kept ([fleetSeen]); null keeps none. */
+    private val prefs: Prefs? = null,
+    /** How long [moveHub] waits for the new address's `ready` frame. */
+    private val readyTimeout: Duration = 10.seconds,
 ) : AuthActions {
     private val _state = MutableStateFlow<AuthState>(AuthState.Unknown)
     override val state: StateFlow<AuthState> = _state.asStateFlow()
@@ -202,6 +232,56 @@ class AppSession(
     }
 
     /**
+     * The hub at [hub] named itself [fleetId] (its `ready` frame). Kept only
+     * while [hub] is still the paired address, for [moveHub].
+     */
+    fun fleetSeen(hub: String, fleetId: String) {
+        val p = prefs ?: return
+        if (credentials()?.hub != hub) return
+        if (p.getStringList(FLEET_ID_PREF) != listOf(hub, fleetId)) p.putStringList(FLEET_ID_PREF, listOf(hub, fleetId))
+    }
+
+    /** The fleet id the paired address last named, or null when none was seen. */
+    private fun knownFleetId(hub: String): String? =
+        prefs?.getStringList(FLEET_ID_PREF)?.takeIf { it.size == 2 && it[0] == hub }?.get(1)
+
+    /**
+     * Point the credential at the hub's new address (review w18-9): the same
+     * token, name and mode, so the hub's device row — its trust, its person,
+     * an admin-set mode — carries on. Nothing is stored unless [address] is a
+     * hub address, accepts this token (`tools/list`), and, when both are
+     * known, names the same fleet id as the address it replaces. The token
+     * goes only to an address the person typed, as at pairing. A 401 there
+     * refuses the move and never unpairs: the old address may still be good.
+     */
+    override suspend fun moveHub(address: String): Credentials {
+        val now = credentials() ?: throw HubMoveRefused(HubMoveRefused.NOT_PAIRED)
+        val base = hubBase(address) ?: throw HubMoveRefused(HubMoveRefused.NOT_AN_ADDRESS)
+        if (base == now.hub) return now
+        try {
+            HubClient(http, base, now.token).toolCatalog()
+        } catch (_: HubError.Unauthorized) {
+            throw HubMoveRefused(HubMoveRefused.TOKEN_REFUSED)
+        }
+        val there = try {
+            withTimeoutOrNull(readyTimeout) {
+                HubEventStream(http, base, now.token).connect().filterIsInstance<HubEvent.Ready>().first().fleetId
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
+        val known = knownFleetId(now.hub)
+        if (known != null && there != null && known != there) throw HubMoveRefused(HubMoveRefused.ANOTHER_FLEET)
+        val next = Credentials(hub = base, token = now.token, name = now.name, mode = now.mode)
+        secrets.write(next)
+        _state.value = AuthState.Paired(next)
+        (there ?: known)?.let { fleetSeen(base, it) }
+        return next
+    }
+
+    /**
      * Drop the credential. Does not cancel it; see the class comment.
      *
      * User-initiated — Settings' *Forget this hub* is the one caller — so any
@@ -280,6 +360,9 @@ class AppSession(
     }
 
     private companion object {
+        /** `[hub, fleet id]`: the fleet the paired address last named. */
+        const val FLEET_ID_PREF = "hub.fleet_id"
+
         /**
          * Which base URL to keep after pairing.
          *
