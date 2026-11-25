@@ -294,21 +294,6 @@ jobs:
           if [[ "$PRERELEASE" == true ]]; then
             kind=(--prerelease --latest=false)
           fi
-          # A re-run after the release was made (the dispatch below failed,
-          # or claude-fleet had not listed the version yet): nothing is
-          # published twice or replaced. When the published APK is this
-          # build byte for byte, the job goes on to tell claude-fleet again;
-          # any other APK under this tag fails here, as a second create did.
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            built="$(sha256sum "$out/fleet-mobile-$VERSION_NAME.apk" | cut -d' ' -f1)"
-            published="$(gh release download "$TAG" --pattern "fleet-mobile-$VERSION_NAME.apk" --output - | sha256sum | cut -d' ' -f1)"
-            if [[ "$built" == "$published" ]]; then
-              echo "::notice::$TAG is already released with this APK: not publishing again"
-              exit 0
-            fi
-            echo "::error::$TAG is already released with another APK ($published, this build is $built): not replacing it" >&2
-            exit 1
-          fi
           gh release create "$TAG" \
             --title "$TAG" \
             --target "$BUILD_SHA" \
