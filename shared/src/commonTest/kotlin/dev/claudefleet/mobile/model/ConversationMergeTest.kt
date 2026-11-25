@@ -134,6 +134,123 @@ class ConversationMergeTest {
         assertEquals(1, have.appending(conversation(orphan)).turns.size)
     }
 
+    /**
+     * w10-1: the running turn outgrew the hub's read tail, so each one-turn
+     * read answers it without its prompt and with an `at` that moved. It is
+     * the held turn, with fresher items: never one more copy per read.
+     */
+    @Test
+    fun the_running_turn_cut_by_the_read_tail_is_not_repeated_as_its_at_drifts() {
+        val live = ConvTurn(prompt = "fix it", at = "t10", endedAt = "t15", promptUuid = "u1", items = listOf(ConvItem.Text("one")))
+        var held = conversation(turn("t01", "a"), live)
+        for ((n, at) in listOf("t12", "t14", "t16").withIndex()) {
+            val cut = ConvTurn(at = at, endedAt = "t2$n", items = listOf(ConvItem.Text("tail $n")))
+            held = held.appending(conversation(cut, truncated = true))
+        }
+
+        assertEquals(listOf("a", "fix it"), held.turns.map { it.prompt })
+        assertEquals("u1", held.turns.last().promptUuid)
+        assertEquals(listOf("tail 2"), held.turns.last().items.map { it.label })
+        assertEquals("t22", held.turns.last().endedAt)
+        assertFalse(held.truncated, "a one-turn read over held turns is no gap")
+    }
+
+    /** The turn that outgrew the tail ended and the next began: the cut copy closes the held turn, the new one follows. */
+    @Test
+    fun a_cut_turn_followed_by_a_new_one_closes_the_held_turn_and_appends_the_new() {
+        val live = ConvTurn(prompt = "fix it", at = "t10", endedAt = "t15", promptUuid = "u1", items = listOf(ConvItem.Text("one")))
+        val cut = ConvTurn(at = "t14", endedAt = "t19", items = listOf(ConvItem.Text("the end")))
+        val merged = conversation(turn("t01", "a"), live).appending(conversation(cut, turn("t20", "next"), truncated = true))
+
+        assertEquals(listOf("a", "fix it", "next"), merged.turns.map { it.prompt })
+        assertEquals(listOf("the end"), merged.turns[1].items.map { it.label })
+        assertFalse(merged.truncated)
+    }
+
+    /** A window's cut first turn from long before the held last turn is not that turn. */
+    @Test
+    fun an_old_cut_turn_is_not_folded_into_a_later_held_turn() {
+        val have = conversation(ConvTurn(prompt = "late", at = "t50", endedAt = "t55", items = listOf(ConvItem.Text("mine"))))
+        val fresh = conversation(ConvTurn(at = "t05", endedAt = "t06", items = listOf(ConvItem.Text("old"))), turn("t50", "late", "mine"))
+
+        val merged = have.appending(fresh)
+        assertEquals(listOf(null, "late"), merged.turns.map { it.prompt })
+        assertEquals(listOf("mine"), merged.turns.last().items.map { it.label })
+    }
+
+    /** r5-09-2: the next turn alone, from a read narrowed to "since the drawn turn", is no gap. */
+    @Test
+    fun a_narrowed_read_of_the_next_turn_alone_is_not_a_gap() {
+        val have = conversation(turn("t1", "a"))
+        val fresh = conversation(turn("t2", "b"), truncated = true)
+
+        assertFalse(have.appending(fresh, narrowed = true).truncated)
+        assertEquals(2, have.appending(fresh, narrowed = true).turns.size)
+        assertTrue(have.appending(fresh).truncated, "a full window that overlaps nothing is one")
+        val cutHead = conversation(ConvTurn(at = "t9", endedAt = "t9", items = listOf(ConvItem.Text("x"))), truncated = true)
+        assertTrue(have.appending(cutHead, narrowed = true).truncated, "the byte tail cut it")
+    }
+
+    /** r5-09-3: after a turn ends the window is two turns; the cut copy of the previous one is that held turn. */
+    @Test
+    fun a_cut_copy_of_the_previous_turn_is_folded_into_it() {
+        val s = ConvTurn(prompt = "s", at = "t10", endedAt = "t19", promptUuid = "u1", items = listOf(ConvItem.Text("all of s")))
+        val t = ConvTurn(prompt = "t", at = "t20", endedAt = "t21", promptUuid = "u2", items = listOf(ConvItem.Text("t1")))
+        val cut = ConvTurn(at = "t17", endedAt = "t19", items = listOf(ConvItem.Text("tail of s")))
+        val merged = conversation(s, t).appending(conversation(cut, t.copy(endedAt = "t25"), truncated = true), narrowed = true)
+
+        assertEquals(listOf("s", "t"), merged.turns.map { it.prompt })
+        assertEquals(listOf("all of s"), merged.turns[0].items.map { it.label }, "unchanged: the fuller held items stay")
+        assertEquals("t25", merged.turns[1].endedAt)
+        assertFalse(merged.truncated)
+    }
+
+    /** r5-09-5: a cut turn that does not fold replaces only a cut turn held LAST, never one further up. */
+    @Test
+    fun a_new_cut_turn_does_not_delete_an_older_one() {
+        val head = ConvTurn(at = "t01", endedAt = "t02", items = listOf(ConvItem.Text("old head")))
+        val have = conversation(head, turn("t10", "a"), turn("t20", "b"))
+        val merged = have.appending(conversation(ConvTurn(at = "t90", endedAt = "t91", items = listOf(ConvItem.Text("new")))))
+
+        assertEquals(listOf("old head", "t10", "t20", "new"), merged.turns.map { it.items.firstOrNull()?.label ?: it.at })
+    }
+
+    /** A cut turn that began after the held one ended is another turn; its later copies replace it. */
+    @Test
+    fun a_cut_turn_that_started_after_the_held_one_is_kept_once() {
+        var held = conversation(ConvTurn(prompt = "a", at = "t10", endedAt = "t11", items = listOf(ConvItem.Text("done"))))
+        for (at in listOf("t30", "t31", "t32")) {
+            held = held.appending(conversation(ConvTurn(at = at, endedAt = at, items = listOf(ConvItem.Text("x $at")))))
+        }
+
+        assertEquals(2, held.turns.size)
+        assertEquals(listOf("done"), held.turns[0].items.map { it.label })
+        assertEquals(listOf("x t32"), held.turns[1].items.map { it.label })
+    }
+
+    /** The ten-turn window's cut first turn drifts too; the window still overlaps what is held. */
+    @Test
+    fun a_cut_first_turn_of_a_window_does_not_break_the_overlap() {
+        val have = conversation(ConvTurn(at = "t1", items = listOf(ConvItem.Text("x"))), turn("t2", "b"))
+        val fresh = conversation(ConvTurn(at = "t1b", items = listOf(ConvItem.Text("y"))), turn("t2", "b"), turn("t3", "c"))
+
+        assertEquals(listOf("t1b", "t2", "t3"), have.appending(fresh).turns.map { it.at })
+    }
+
+    /**
+     * w10-2: a caught-up read asks for one turn and the hub marks it truncated
+     * because the conversation has more. The held turns are those: no banner.
+     */
+    @Test
+    fun a_narrower_read_that_overlaps_does_not_mark_a_complete_conversation_truncated() {
+        val have = conversation(turn("t1", "a"), turn("t2", "b"), turn("t3", "c"))
+        val fresh = conversation(turn("t3", "c", "more"), truncated = true)
+
+        val merged = have.appending(fresh)
+        assertEquals(3, merged.turns.size)
+        assertFalse(merged.truncated)
+    }
+
     // ---- context/events: task 5 review, "zero test coverage" ----
     //
     // `appending()` is a rolling-window merge like `turns` itself, not a

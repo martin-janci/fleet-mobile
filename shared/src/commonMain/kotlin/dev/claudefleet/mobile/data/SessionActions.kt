@@ -134,6 +134,14 @@ interface SessionActions {
     suspend fun queuePrompt(sessionId: Long, prompt: String, timing: SendLaterTiming = SendLaterTiming()): QueuePromptResult =
         throw UnsupportedOperationException("queue_prompt")
 
+    /**
+     * [queuePrompt] under a caller-chosen `client_msg_id` (hub contract 18):
+     * sent again with the same id, the hub answers what the first call did
+     * (review w09-3). Only for a hub whose `queue_prompt` declares it.
+     */
+    suspend fun queuePrompt(sessionId: Long, prompt: String, timing: SendLaterTiming, clientMsgId: String): QueuePromptResult =
+        queuePrompt(sessionId, prompt, timing)
+
     /** The prompts the hub keeps for this session; [cancel] takes one back first (`queued_prompts`). */
     suspend fun queuedPrompts(sessionId: Long, cancel: Long? = null): List<QueuedPrompt> = emptyList()
 
@@ -272,6 +280,9 @@ class HubSessionActions(private val session: AppSession) : SessionActions {
 
     override suspend fun queuePrompt(sessionId: Long, prompt: String, timing: SendLaterTiming): QueuePromptResult =
         session.withClient { it.queuePrompt(sessionId, prompt, timing) }
+
+    override suspend fun queuePrompt(sessionId: Long, prompt: String, timing: SendLaterTiming, clientMsgId: String): QueuePromptResult =
+        session.withClient { it.queuePrompt(sessionId, prompt, timing, clientMsgId) }
 
     override suspend fun queuedPrompts(sessionId: Long, cancel: Long?): List<QueuedPrompt> =
         session.withClient { it.queuedPrompts(sessionId, cancel) }

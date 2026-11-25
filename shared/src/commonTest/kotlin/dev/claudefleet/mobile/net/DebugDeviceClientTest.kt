@@ -52,7 +52,7 @@ class DebugDeviceClientTest {
         assertEquals("debug_devices", params["name"]!!.jsonPrimitive.content)
         val args = params["arguments"]!!.jsonObject
         assertEquals("screenshot", args["action"]!!.jsonPrimitive.content)
-        assertEquals("7", args["device"]!!.jsonPrimitive.content)
+        assertEquals("#7", args["device"]!!.jsonPrimitive.content)
     }
 
     @Test

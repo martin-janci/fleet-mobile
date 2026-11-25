@@ -1574,6 +1574,116 @@ class SessionViewModelTest {
         )
     }
 
+    /** w10-3: Esc ends a turn without moving `turn_seq`; the row leaving `working` is the cue to read its end. */
+    @Test
+    fun a_row_that_stops_working_without_a_new_turn_is_read_once_more() = runTest {
+        val actions = FakeActions()
+        actions.answer = Conversation(listOf(turn("t1", "do it")))
+        val fleet = FakeFleetState(listOf(row(status = "working", turnSeq = 3)))
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        vm.load().join()
+
+        fleet.sessions.value = listOf(row(status = "idle", turnSeq = 3))
+        fleet.sessionChanges.tryEmit(ID)
+        pastDebounce()
+        runCurrent()
+        assertEquals(2, actions.reads, "the interrupted turn's last lines")
+
+        fleet.sessions.value = listOf(row(status = "idle", activity = "x", turnSeq = 3))
+        fleet.sessionChanges.tryEmit(ID)
+        pastDebounce()
+        runCurrent()
+        assertEquals(2, actions.reads, "and then it is settled")
+    }
+
+    /** w10-4: `/clear` changes `claude_session_id` and nothing else; the screen starts over on the new conversation. */
+    @Test
+    fun a_new_claude_session_id_starts_the_conversation_over() = runTest {
+        val actions = FakeActions()
+        actions.answer = Conversation(listOf(turn("t1", "old")))
+        val fleet = FakeFleetState(listOf(row(status = "idle", turnSeq = 3).copy(claudeSessionId = "a")))
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        vm.load().join()
+
+        // A re-list leaves the column out: not a change.
+        fleet.sessions.value = listOf(row(status = "idle", turnSeq = 3))
+        runCurrent()
+        assertEquals(1, actions.reads)
+
+        actions.answer = Conversation(listOf(turn("t2", "new")))
+        fleet.sessions.value = listOf(row(status = "idle", turnSeq = 3).copy(claudeSessionId = "b"))
+        runCurrent()
+
+        assertEquals(listOf<Long?>(null, null), actions.cursors, "a full window, not since the old turn")
+        assertEquals(listOf<String?>("new"), vm.state.value.conversation.turns.map { it.prompt })
+    }
+
+    /**
+     * r5-09-1: a re-listed row has no `claude_session_id`, and an idle session
+     * sends no frame, so the first id the row carries is the `/clear`'s own.
+     * The baseline is the picker's current conversation, read at open.
+     */
+    @Test
+    fun a_clear_on_an_idle_session_opened_from_a_relisted_row_is_followed() = runTest {
+        val actions = FakeActions()
+        actions.answer = Conversation(listOf(turn("t1", "old")))
+        actions.conversationList = listOf(ConversationSummary(claudeSessionId = "a", current = true))
+        val fleet = FakeFleetState(listOf(row(status = "idle", turnSeq = 3)), tools = setOf(HubCapabilities.SESSION_CONVERSATIONS))
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        vm.load().join()
+        runCurrent()
+
+        fleet.sessions.value = listOf(row(status = "idle", turnSeq = 3).copy(claudeSessionId = "a"))
+        runCurrent()
+        assertEquals(1, actions.reads, "the same conversation: nothing to start over")
+
+        actions.answer = Conversation(listOf(turn("t2", "new")))
+        fleet.sessions.value = listOf(row(status = "idle", turnSeq = 3).copy(claudeSessionId = "b"))
+        runCurrent()
+        assertEquals(listOf<String?>("new"), vm.state.value.conversation.turns.map { it.prompt })
+    }
+
+    /** r5-09-1, the scenario itself: the row's first id is already the new conversation's. */
+    @Test
+    fun the_first_id_a_row_carries_is_compared_with_the_conversation_read_at_open() = runTest {
+        val actions = FakeActions()
+        actions.answer = Conversation(listOf(turn("t1", "old")))
+        actions.conversationList = listOf(ConversationSummary(claudeSessionId = "a", current = true))
+        val fleet = FakeFleetState(listOf(row(status = "idle", turnSeq = 3)), tools = setOf(HubCapabilities.SESSION_CONVERSATIONS))
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        vm.load().join()
+        runCurrent()
+
+        actions.answer = Conversation(listOf(turn("t2", "new")))
+        fleet.sessions.value = listOf(row(status = "idle", turnSeq = 3).copy(claudeSessionId = "b"))
+        runCurrent()
+        assertEquals(listOf<String?>("new"), vm.state.value.conversation.turns.map { it.prompt })
+        assertEquals(listOf<Long?>(null, null), actions.cursors)
+    }
+
+    /** r5-09-4: a read in flight when the conversation changes applies first and is then wiped, not the other way round. */
+    @Test
+    fun a_read_in_flight_does_not_put_the_cleared_conversation_back() = runTest {
+        val actions = FakeActions()
+        actions.answer = Conversation(listOf(turn("t1", "old")))
+        val fleet = FakeFleetState(listOf(row(status = "idle", turnSeq = 3).copy(claudeSessionId = "a")))
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        vm.load().join()
+        runCurrent()
+
+        val gate = actions.queueRead(Conversation(listOf(turn("t1", "old"), turn("t1b", "old too"))))
+        vm.refresh()
+        runCurrent()
+        actions.answer = Conversation(listOf(turn("t2", "new")))
+        fleet.sessions.value = listOf(row(status = "idle", turnSeq = 3).copy(claudeSessionId = "b"))
+        runCurrent()
+        gate.complete(Unit)
+        runCurrent()
+
+        assertEquals(listOf<String?>("new"), vm.state.value.conversation.turns.map { it.prompt })
+        assertEquals(null, actions.cursors.last(), "the read after the wipe is a full window")
+    }
+
     /** A completed turn is news on any status. */
     @Test
     fun a_completed_turn_refetches_even_on_a_settled_session() = runTest {
@@ -3155,7 +3265,7 @@ class SessionViewModelTest {
     @Test
     fun safe_kill_calls_the_hub_and_refetches() = runTest {
         val actions = FakeActions()
-        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        val vm = SessionViewModel(ID, FakeFleetState(listOf(row().copy(status = "running"))), actions, backgroundScope)
         vm.load().join()
         val readsBefore = actions.reads
 
@@ -3164,6 +3274,25 @@ class SessionViewModelTest {
 
         assertEquals(listOf(ID), actions.safeKilled)
         assertTrue(actions.reads > readsBefore)
+    }
+
+    /** Review w17-2: the hub types the clean-up prompt into the pane, so never a shell, a stopped session or one already asked. */
+    @Test
+    fun clean_up_is_not_sent_for_a_shell_a_stopped_session_or_one_already_asked() = runTest {
+        val running = row().copy(status = "running")
+        for (r in listOf(running.copy(kind = "shell"), running.copy(status = "stopped"), running.copy(safeKillState = "requested"))) {
+            val actions = FakeActions()
+            val vm = SessionViewModel(ID, FakeFleetState(listOf(r)), actions, backgroundScope)
+            vm.load().join()
+            vm.safeKill().join()
+            runCurrent()
+            assertTrue(actions.safeKilled.isEmpty(), "$r")
+            assertFalse(mayCleanUp(r))
+        }
+        assertTrue(mayCleanUp(running))
+        assertTrue(orbitMenuItems(OrbitMenuFacts(manage = true, cleanUp = false)).none { it.id == OrbitItem.Retire })
+        assertEquals("This kills and recreates the tmux session in place — for a wedged REPL. The turn in progress is lost.", restartConfirmBody(working = true))
+        assertFalse(restartConfirmBody(working = false).contains("lost"))
     }
 
     @Test
@@ -5290,6 +5419,96 @@ class SessionViewModelTest {
         runCurrent()
         assertEquals(listOf(Triple<String?, String, String?>(null, "fork", "fork-of-api-work")), actions.rewound)
         assertEquals(FORKED, opened)
+    }
+
+    /**
+     * Review w18-1: an "answer only" device (the hub's `TokenMode::Answer`)
+     * presses a dialog's keys and types no prompt.
+     */
+    @Test
+    fun an_answer_only_device_presses_keys_and_sends_no_prompt() = runTest {
+        val actions = FakeActions()
+        val fleet = FakeFleetState(listOf(blockedRow()))
+        fleet.hubVersion.value = HUB_VERSION_KEYS
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope, canSendPrompts = false, canPressKeys = true)
+        vm.load().join()
+        vm.onDraftChange("ship it")
+        runCurrent()
+        val s = vm.state.value
+        assertTrue(s.readOnly, "no prompt from an answer-only device")
+        assertTrue(s.mayPressKeys)
+        assertTrue(s.canAnswer)
+        assertFalse(s.canSend)
+
+        vm.answer(Answer.Enter).join()
+        runCurrent()
+        assertNull(vm.state.value.error)
+        assertTrue(actions.waited.isNotEmpty(), "the key went out and its turn was waited for")
+
+        val readonly = SessionViewModel(ID, fleet, FakeActions(), backgroundScope, canSendPrompts = false)
+        runCurrent()
+        assertFalse(readonly.state.value.mayPressKeys, "a readonly device still presses nothing")
+    }
+
+    /**
+     * Review w18-3: the key's receipt is in hand; a long poll that fails
+     * after it (a lift, Wi-Fi to cellular) is not a failed answer.
+     */
+    @Test
+    fun a_failed_wait_after_an_accepted_answer_is_not_reported_as_a_failed_write() = runTest {
+        val fake = FakeActions()
+        val actions = object : SessionActions by fake {
+            override suspend fun waitForTurn(sessionId: Long, turn: Long, timeoutS: Int): WaitResult =
+                throw HubError.Transport(ConnectException())
+        }
+        val fleet = FakeFleetState(listOf(blockedRow()))
+        fleet.hubVersion.value = HUB_VERSION_KEYS
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+
+        vm.answer(Answer.Enter).join()
+        runCurrent()
+
+        assertNull(vm.state.value.error, "no \"May have gone through\" for an answer the hub took")
+        assertFalse(vm.state.value.answering)
+        assertTrue(vm.state.value.stillWaiting, "the row has not moved: still waiting, as after a timeout")
+    }
+
+    /**
+     * Review w09-3: a queued prompt whose answer was lost and which the
+     * read-back cannot see (typed at once) goes back in the box; sent again,
+     * it carries the same `client_msg_id`, so the hub answers the first call.
+     */
+    @Test
+    fun the_same_words_queued_again_after_a_lost_answer_reuse_the_send_id() = runTest {
+        val fake = FakeActions()
+        val ids = mutableListOf<String>()
+        var lose = true
+        val actions = object : SessionActions by fake {
+            override suspend fun queuePrompt(sessionId: Long, prompt: String, timing: SendLaterTiming, clientMsgId: String): QueuePromptResult {
+                ids += clientMsgId
+                if (lose) throw HubError.Tool("E_SSH_TIMEOUT", "timed out")
+                return fake.queuePrompt(sessionId, prompt, timing)
+            }
+        }
+        val fleet = FakeFleetState(listOf(row(status = "working")), tools = setOf("queue_prompt", "queued_prompts"))
+        fleet.capabilities.value = fleet.capabilities.value.copy(params = mapOf("queue_prompt" to setOf("session_id", "prompt", "client_msg_id")))
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope, queueWhileWorking = true)
+        runCurrent()
+        vm.onDraftChange("also check CI")
+        vm.send().join()
+        runCurrent()
+        assertEquals("also check CI", vm.state.value.draft, "the hub lists nothing waiting: back in the box")
+
+        lose = false
+        vm.send().join()
+        runCurrent()
+        assertEquals(2, ids.size)
+        assertEquals(ids[0], ids[1], "the retry is the same send to the hub")
+
+        vm.onDraftChange("and the docs")
+        vm.send().join()
+        runCurrent()
+        assertTrue(ids[2] != ids[0], "new words are a new send")
     }
 }
 

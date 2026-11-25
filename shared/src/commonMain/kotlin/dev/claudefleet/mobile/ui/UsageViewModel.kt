@@ -31,6 +31,34 @@ enum class UsageWindow(val label: String, val seconds: Long) {
     Month("30 days", 30 * 86_400),
 }
 
+/** The Usage screen's big figure, and what it is a figure of. */
+data class UsageHeadline(val costMicros: Long, val tokens: Long, val outputTokens: Long, val label: String)
+
+/**
+ * What was spent in the days the report lists: the sum of its `by_day`, the
+ * hub's durable roll-up, labelled by those days ("24 h" spans two UTC days).
+ * `usage_report`'s `total` and `by_host` are not that: they are the whole
+ * lifetime cost of every session whose usage moved in the window, so a
+ * three-week session that ran one turn today counts in full (review w07-1).
+ * A report with no days (an older hub) shows `total` under its true name.
+ */
+fun usageHeadline(report: UsageReport): UsageHeadline {
+    val days = report.byDay
+    if (days.isEmpty()) {
+        return UsageHeadline(report.total.costMicros, report.total.tokens, report.total.outputTokens, WHOLE_COST_LABEL)
+    }
+    val first = days.minOf { it.day }
+    val last = days.maxOf { it.day }
+    return UsageHeadline(
+        costMicros = days.sumOf { it.costMicros },
+        tokens = days.sumOf { it.inputTokens + it.outputTokens + it.cacheWriteTokens + it.cacheReadTokens },
+        outputTokens = days.sumOf { it.outputTokens },
+        label = if (first == last) "Spent on $first (UTC)" else "Spent $first to $last (UTC days)",
+    )
+}
+
+const val WHOLE_COST_LABEL = "Whole cost of the sessions active in this time"
+
 /** What an account's live sessions are doing, for its Accounts row (review 2026-11-03 F11). */
 data class AccountSessions(val live: Int = 0, val paused: Int = 0)
 
@@ -295,8 +323,9 @@ class UsageViewModel(
 
 /** 1234 → "1.2k", 2_500_000 → "2.5M". */
 internal fun compactCount(n: Long): String = when {
-    n >= 1_000_000_000 -> oneDecimal(n / 1_000_000_000.0) + "B"
-    n >= 1_000_000 -> oneDecimal(n / 1_000_000.0) + "M"
+    // A unit steps up where its rounded figure would read 1000 ("1000k").
+    n >= 999_950_000 -> oneDecimal(n / 1_000_000_000.0) + "B"
+    n >= 999_950 -> oneDecimal(n / 1_000_000.0) + "M"
     n >= 1_000 -> oneDecimal(n / 1_000.0) + "k"
     else -> n.toString()
 }

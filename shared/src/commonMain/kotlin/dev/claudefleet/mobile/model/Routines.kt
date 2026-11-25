@@ -146,8 +146,16 @@ data class RoutineBudget(
 data class FailingRoutine(
     val routine: Routine,
     val run: RoutineRun,
-    @SerialName("may_change") val mayChange: Boolean = false,
-)
+    /**
+     * Whether this person may change the routine. Null when the hub did not
+     * say (it tolerates the field's absence): read as "may", so such a hub's
+     * failures are still announced and listed (review r5-08-3).
+     */
+    @SerialName("may_change") val mayChange: Boolean? = null,
+) {
+    /** Theirs to act on: the hub said so, or said nothing. */
+    val actsHere: Boolean get() = mayChange != false
+}
 
 /**
  * One check a fire passes or fails (`routines { explain }`, claude-fleet

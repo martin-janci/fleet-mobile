@@ -23,9 +23,11 @@ fun relativeAgo(epochSeconds: Long?, nowSeconds: Long): String? {
 }
 
 /**
- * Time left until [deadlineSeconds]: "5 min", "2 h"; "under a minute" at the
- * end, never "just now". Null once the deadline has passed: there is no time
- * left to name, and every caller drops its "in …" / "… left" phrase on null.
+ * Time left until [deadlineSeconds]: "5 min", "1 h 59 min", "1 d 23 h";
+ * "under a minute" at the end, never "just now". Two units from an hour up:
+ * one floored unit (right for an age) understates a wait by up to half. Null
+ * once the deadline has passed: there is no time left to name, and every
+ * caller drops its "in …" / "… left" phrase on null.
  */
 fun relativeWithin(deadlineSeconds: Long?, nowSeconds: Long): String? {
     if (deadlineSeconds == null) return null
@@ -33,6 +35,8 @@ fun relativeWithin(deadlineSeconds: Long?, nowSeconds: Long): String? {
     return when {
         left <= 0 -> null
         left < 60 -> "under a minute"
-        else -> relativeTime(nowSeconds, deadlineSeconds)
+        left < 3600 -> "${left / 60} min"
+        left < 86_400 -> "${left / 3600} h" + ((left % 3600) / 60).let { if (it > 0) " $it min" else "" }
+        else -> "${left / 86_400} d" + ((left % 86_400) / 3600).let { if (it > 0) " $it h" else "" }
     }
 }

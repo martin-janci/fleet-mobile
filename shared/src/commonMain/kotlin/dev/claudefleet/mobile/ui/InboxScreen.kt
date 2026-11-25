@@ -74,7 +74,7 @@ import dev.claudefleet.mobile.ui.kit.PhoneRow
  * id so the list does not reshuffle on every event frame.
  */
 fun inboxRows(sessions: List<SessionRow>, access: MyAccess = MyAccess.UNKNOWN): List<SessionRow> =
-    sessions.filter { it.needsAttention && answersHere(access.levelFor(it)) }
+    sessions.filter { it.needsAttention && access.waitsOnMe(it) && answersHere(access.levelFor(it), it) }
         .sortedWith(compareBy<SessionRow, Long?>(nullsLast()) { it.askedAt }.thenBy { it.id })
 
 /**
@@ -89,7 +89,7 @@ fun proposedRows(
     /** Readings set aside with Not waiting on this phone ([proposalKey]), left out (G5.4). */
     setAside: Set<String> = emptySet(),
 ): List<SessionRow> =
-    sessions.filter { it.isProposed && access.levelFor(it) == null && proposalKey(it) !in setAside }
+    sessions.filter { it.isProposed && access.mineOrUnclaimed(it) && proposalKey(it) !in setAside }
         .sortedWith(compareBy<SessionRow, Long?>(nullsLast()) { it.askedAt }.thenBy { it.id })
 
 /**
@@ -100,11 +100,23 @@ fun needYouCount(sessions: Int, missions: Int, agentActions: Int, reviewAsks: In
     sessions + missions + agentActions + reviewAsks + failedRoutines
 
 /**
- * Whether a session at share [level] is this person's to answer (review
- * w08-3, option a): their own (null), or shared at Answer or Steer. At Watch
- * the question is its owner's, so it is neither counted nor notified.
+ * Whether [row], at share [level], is this person's to answer (review
+ * w08-3, option a): their own (null) for any reason; shared at Answer only
+ * while it asks something (a question or a form), at Steer also when its turn
+ * failed (a prompt retries it). An account at its limit, a signed-out login
+ * and every other reason are the owner's to act on: the hub refuses a
+ * grantee the restart they take (review w05-2). At Watch nothing is theirs,
+ * so it is neither counted nor notified.
  */
-fun answersHere(level: String?): Boolean = level == null || level == GrantLevel.ANSWER || level == GrantLevel.DRIVE
+fun answersHere(level: String?, row: SessionRow): Boolean = when (level) {
+    null -> true
+    GrantLevel.ANSWER -> row.asksSomething
+    GrantLevel.DRIVE -> row.asksSomething || row.attentionReason == "failed"
+    else -> false
+}
+
+private val SessionRow.asksSomething: Boolean
+    get() = attentionReason == "waiting" || pendingInput != null || pendingForm != null
 
 /** One session someone else shared with this person, and at what level (redesign 11.10, the Watch board). */
 data class SharedRow(val row: SessionRow, val level: String)
@@ -183,7 +195,7 @@ internal fun inboxSubtitle(needYou: Int, running: Int, proposed: Int = 0, paused
  */
 fun pausedRows(sessions: List<SessionRow>, access: MyAccess = MyAccess.UNKNOWN): List<SessionRow> =
     sessions.filter {
-        (it.attention?.state == "paused" || it.attentionReason == "lifecycle") && access.levelFor(it) == null
+        (it.attention?.state == "paused" || it.attentionReason == "lifecycle") && access.mineOrUnclaimed(it)
     }
 
 /**

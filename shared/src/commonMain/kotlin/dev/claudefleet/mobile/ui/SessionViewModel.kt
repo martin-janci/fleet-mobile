@@ -64,7 +64,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -111,8 +113,8 @@ data class SessionUiState(
     val share: String? = null,
     /**
      * A dialog's keys (an option's digit, Enter, Escape) may be pressed: the
-     * credential may write and the session is not shared at watch. Wider
-     * than ![readOnly] by exactly an Answer share.
+     * credential may answer and the session is not shared at watch. Wider
+     * than ![readOnly] by an Answer share and by an answer-only device.
      */
     val mayPressKeys: Boolean = true,
     /**
@@ -589,6 +591,13 @@ class SessionViewModel(
      * (review w17-1). Null runs the calls in [scope], as a bare view model does.
      */
     private val callScope: CoroutineScope? = null,
+    /**
+     * The credential may answer a dialog (a key through `send_prompt`): a
+     * `full` one, or the hub's "answer only" mode, which sends no prompt
+     * (review w18-1). Defaults to [canSendPrompts], the two modes older
+     * callers know.
+     */
+    canPressKeys: Boolean = canSendPrompts,
 ) {
     /**
      * On this screen a missing thing is the session: `E_NOTFOUND` reads "This
@@ -702,6 +711,7 @@ class SessionViewModel(
         ),
     )
     private val tokenReadOnly = !canSendPrompts
+    private val tokenMayAnswer = canPressKeys || canSendPrompts
 
     /**
      * No prompt from this screen: the credential's `readonly`, or a share
@@ -714,7 +724,7 @@ class SessionViewModel(
     private fun readOnlyFor(share: String?): Boolean =
         tokenReadOnly || share == GrantLevel.WATCH || share == GrantLevel.ANSWER
 
-    private fun mayPressKeysFor(share: String?): Boolean = !tokenReadOnly && share != GrantLevel.WATCH
+    private fun mayPressKeysFor(share: String?): Boolean = tokenMayAnswer && share != GrantLevel.WATCH
 
     /** The level this session is shared with this person at, or null when it is theirs or nothing is known. */
     private fun shareNow(): String? = fleet.access.value.levelFor(row())
@@ -786,6 +796,16 @@ class SessionViewModel(
      * before there is a drawn state to compare against.
      */
     private var drawnTurnSeq: Long? = null
+
+    /**
+     * The row's `claude_status` as of the same read. A row that leaves
+     * `working` / `blocked` without its turn count moving (Esc fires no Stop
+     * hook) still has an end to read: the last lines and "Interrupted".
+     */
+    private var drawnStatus: String? = null
+
+    /** The conversation (`claude_session_id`) the screen is on, as far as it knows; null until a read or a frame says. */
+    private var seenClaude: String? = null
 
     /** The generation currently inside [fetchLock], fetching and applying. */
     private var running: Generation? = null
@@ -990,6 +1010,28 @@ class SessionViewModel(
                     if (gone != null && (now == null || questionKey(now) != gone)) it.copy(goneQuestion = null) else it
                 }
             }
+        }
+        // A `/clear` or a resume puts the session on another conversation
+        // without moving its turn count: start over on it rather than append
+        // under the old one (the desktop's `seenClaude`). Null is "not
+        // known" (a re-list's phone view leaves the column out), never a
+        // change. The baseline is the picker's current conversation, read at
+        // open ([loadConversations]): a re-listed row has no id until its next
+        // frame, and on an idle session that frame is the `/clear` itself.
+        scope.launch {
+            fleet.sessions
+                .map { rows -> rows.firstOrNull { it.id == sessionId }?.claudeSessionId }
+                .filterNotNull()
+                .distinctUntilChanged()
+                .collect { id ->
+                    val before = seenClaude
+                    seenClaude = id
+                    if (before == null || before == id) return@collect
+                    // Under the lock: a read in flight is of the old
+                    // conversation, and applies before the screen is wiped.
+                    fetchLock.withLock { startOver() }
+                    requestRead(first = true)
+                }
         }
         scope.launch {
             fleet.sessionChanges
@@ -1277,7 +1319,16 @@ class SessionViewModel(
      */
     private suspend fun awaitAnswerLanded(asked: SessionRow?, turnBefore: Long): Boolean = coroutineScope {
         val turn = async {
-            actions.waitForTurn(sessionId, turnBefore, timeoutS = ANSWER_WAIT_SECONDS).status == WAIT_SATISFIED
+            // The key is already in: a long poll that fails (a lift, Wi-Fi to
+            // cellular) is not a failed answer. The row decides, and a
+            // timeout falls through to the pane re-check (review w18-3).
+            try {
+                actions.waitForTurn(sessionId, turnBefore, timeoutS = ANSWER_WAIT_SECONDS).status == WAIT_SATISFIED
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Throwable) {
+                false
+            }
         }
         val moved = async {
             withTimeoutOrNull(ANSWER_WAIT_SECONDS.seconds) {
@@ -1398,15 +1449,31 @@ class SessionViewModel(
      * the turn ends: out of the box at once, back in it if the hub refuses.
      * A turn that ended meanwhile is typed now ([QueuePromptResult.delivered]).
      */
+    /** A queued prompt whose outcome is unknown (its words, its `client_msg_id`), for the next send of the same words. */
+    private var queueUnknown: Pair<String, String>? = null
+
     private suspend fun queueDraft(text: String) {
         val body = text.trim()
         local.update { it.copy(sending = true, error = null, pending = body, draft = "") }
+        // One id per prompt, kept while its outcome is unknown: the same
+        // words sent again go under it, and the hub answers what the first
+        // call did rather than typing them twice (review w09-3). Only to a
+        // hub whose `queue_prompt` takes one; an older hub is read back.
+        val sendId = if (fleet.capabilities.value.accepts(HubCapabilities.QUEUE_PROMPT, "client_msg_id")) {
+            queueUnknown?.takeIf { it.first == body }?.second ?: newPromptSendId(clock())
+        } else {
+            null
+        }
         try {
-            val r = outliving({ actions.queuePrompt(sessionId, body, SendLaterTiming()) }) { t ->
+            val r = outliving({
+                if (sendId != null) actions.queuePrompt(sessionId, body, SendLaterTiming(), sendId)
+                else actions.queuePrompt(sessionId, body, SendLaterTiming())
+            }) { t ->
                 // Gone: back in the box the return finds, unless it holds
                 // something else or the hub may have kept it (review w17-3).
                 if (!scope.isActive && !mayHaveRun(t) && drafts.recall(sessionId).isEmpty()) drafts.keep(sessionId, text)
             }
+            queueUnknown = null
             quickReplies.remember(body)
             val queued = orNullUnlessCancelled { actions.queuedPrompts(sessionId) }
             local.update { it.copy(sending = false, pending = null, queued = queued?.filter { q -> q.waiting } ?: it.queued) }
@@ -1415,10 +1482,12 @@ class SessionViewModel(
             local.update { it.copy(sending = false, pending = null, draft = if (it.draft.isEmpty()) text else it.draft) }
             throw e
         } catch (t: Throwable) {
-            // `queue_prompt` keeps no `client_msg_id`: an answer lost after the
-            // hub stored the prompt is read back, and words it has are not put
-            // back in the box to be queued twice (review w17-3).
+            // An answer lost after the hub stored the prompt is read back, and
+            // words it has are not put back in the box to be queued twice
+            // (review w17-3). The read cannot see one the hub typed at once,
+            // so the id is kept for the same words sent again (review w09-3).
             val unknown = mayHaveRun(t)
+            queueUnknown = if (unknown && sendId != null) body to sendId else null
             val queued = if (unknown) orNullUnlessCancelled { actions.queuedPrompts(sessionId) }?.filter { q -> q.waiting } else null
             if (queued != null && queued.any { q -> withoutUntrustedMarker(q.body).trim() == body.trim() }) {
                 quickReplies.remember(body)
@@ -2076,6 +2145,8 @@ class SessionViewModel(
         try {
             val list = actions.conversations(sessionId)
             local.update { it.copy(conversations = list) }
+            // The baseline a later row frame is compared with, where none is known yet.
+            if (seenClaude == null) seenClaude = list.firstOrNull { it.current }?.claudeSessionId
         } catch (e: CancellationException) {
             throw e
         } catch (_: Throwable) {
@@ -2185,9 +2256,12 @@ class SessionViewModel(
     /** After a rewind the session is on a new conversation: drop the old one rather than append to it. */
     private fun startOver() {
         drawnTurnSeq = null
+        drawnStatus = null
         local.update {
             it.copy(conversation = Conversation(), loaded = false, newReply = false, unseen = 0, olderLoaded = false, viewing = null, earlier = null)
         }
+        // The hub kept the conversation this one replaces: the picker's list changed.
+        loadConversations()
     }
 
     /**
@@ -2261,7 +2335,7 @@ class SessionViewModel(
     }
 
     /** Ask the session to persist its work, then arm deletion once it is clean. */
-    fun safeKill(): Job = runManaged(::canManageNow) { actions.safeKill(sessionId) }
+    fun safeKill(): Job = runManaged({ canManageNow() && mayCleanUp(row()) }) { actions.safeKill(sessionId) }
 
     /**
      * Kill the session now, without waiting for it to persist anything. The
@@ -2422,17 +2496,20 @@ class SessionViewModel(
      * idle, done, stopped or failed and its turn count did not change: there
      * is nothing new to read.
      *
-     * A `/clear`, a resume or a compaction switches the conversation under
-     * us. The row does carry `claude_session_id`, but this app's model does
-     * not — no screen draws it. It is covered anyway: a new conversation
-     * starts its turn count over, so the count differs from the drawn one and
-     * the read happens. `!=`, not `>`, for exactly that reason.
+     * One more read happens when the row LEAVES `working` / `blocked`
+     * ([drawnStatus]): an interrupted turn ends without a turn count.
+     *
+     * A `/clear` or a resume switches the conversation under us and does not
+     * move the turn count (the hub only ever adds one to it): the row's
+     * `claude_session_id` says so, and `init` starts over when it changes.
      */
     private fun rowChangeCouldMoveTheConversation(): Boolean {
         val row = row() ?: return true
         if (row.turnSeq != drawnTurnSeq) return true
-        return row.claudeStatus == "working" || row.claudeStatus == "blocked"
+        return inFlight(row.claudeStatus) || inFlight(drawnStatus)
     }
+
+    private fun inFlight(status: String?): Boolean = status == "working" || status == "blocked"
 
     /** True while the hub named a contract this build refuses to talk across. */
     private fun refused(): Boolean = fleet.status.value is ConnectionStatus.Refused
@@ -2510,14 +2587,16 @@ class SessionViewModel(
                 // every time. Null on the first read, which is the full
                 // window — and `appending` folds a narrower one the same way,
                 // since it is still a tail whose head overlaps what is held.
-                val fresh = actions.conversation(sessionId, sinceTurn = drawnTurnSeq)
+                val since = drawnTurnSeq
+                val fresh = actions.conversation(sessionId, sinceTurn = since)
                 // Stamped from the row as it is NOW, inside the lock and
                 // before the apply: the read reflects whatever the hub had
                 // when it answered, and a turn that completes after this
                 // point must still trigger the next read.
                 drawnTurnSeq = row()?.turnSeq
+                drawnStatus = row()?.claudeStatus
                 local.update { current ->
-                    val appended = current.conversation.appending(fresh)
+                    val appended = current.conversation.appending(fresh, narrowed = since != null)
                     // The same "did the tail move" signal `SessionScreen`'s
                     // own auto-scroll effect keys on: turn count alone misses
                     // the ordinary case of the live turn growing new items

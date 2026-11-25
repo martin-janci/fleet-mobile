@@ -38,7 +38,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -275,6 +279,8 @@ class TaskViewModel(
         val asOf: Long? = null,
         val placeOpen: Boolean = false,
         val busy: Boolean = false,
+        /** This task's comment is on the wire, from this visit or one the person left ([TaskCommentDrafts.sending]). */
+        val commentSending: Boolean = false,
         val error: Friendly? = null,
         val conflict: Boolean = false,
         val loadError: Friendly? = null,
@@ -326,6 +332,21 @@ class TaskViewModel(
             // is not a change ([workSignatureChanges]).
             merge(fleet.workChanges.throttleLatest(refreshDebounceMs), fleet.workSignatureChanges().throttleLatest(refreshDebounceMs))
                 .collect { if (fleet.status.value.isConnected()) load() }
+        }
+        // How a comment sent from a visit the person left ended is heard on
+        // the visit they are on (review w05-6): held while it is on the wire,
+        // its words out of the box once the hub took them, its refusal said now.
+        commentDrafts?.let { drafts ->
+            scope.launch {
+                drafts.sending.map { taskId in it }.distinctUntilChanged().collect { on -> local.update { it.copy(commentSending = on) } }
+            }
+            scope.launch {
+                drafts.outcomes.collect { o ->
+                    if (o.taskId != taskId) return@collect
+                    if (o.body != null) local.update { it.copy(commentDraft = if (it.commentDraft.trim() == o.body) "" else it.commentDraft) }
+                    if (o.failure != null) drafts.takeFailure(taskId)?.let { why -> local.update { it.copy(error = why) } }
+                }
+            }
         }
     }
 
@@ -861,7 +882,7 @@ class TaskViewModel(
             knownGroups = placeableGroups(knownGroups()),
             groupCounts = groupCounts(),
             placementNote = detail?.placement?.note.orEmpty(),
-            busy = l.busy,
+            busy = l.busy || l.commentSending,
             error = l.error,
             conflict = l.conflict,
             loadError = l.loadError,
@@ -988,8 +1009,26 @@ internal fun promotionLine(p: PromotionView): String? {
  */
 class TaskCommentDrafts {
     private val texts = mutableMapOf<String, String>()
-    private val sending = mutableSetOf<String>()
+    private val _sending = MutableStateFlow<Set<String>>(emptySet())
     private val failures = mutableMapOf<String, Friendly>()
+    private val _outcomes = MutableSharedFlow<CommentOutcome>(extraBufferCapacity = 16)
+    private var hub: String? = null
+
+    /** The tasks with a comment on the wire, for the page on screen. */
+    val sending: StateFlow<Set<String>> = _sending.asStateFlow()
+
+    /** How a send ended, for the page on screen: the one that sent it may be gone. */
+    val outcomes: SharedFlow<CommentOutcome> = _outcomes.asSharedFlow()
+
+    /** Task ids repeat across hubs: another hub's boxes and refusals go. */
+    fun forHub(hubUrl: String) {
+        if (hub != null && hub != hubUrl) {
+            texts.clear()
+            failures.clear()
+            _sending.value = emptySet()
+        }
+        hub = hubUrl
+    }
 
     fun text(taskId: String): String? = texts[taskId]
 
@@ -998,19 +1037,37 @@ class TaskCommentDrafts {
     }
 
     /** Mark [taskId]'s comment on the wire; false when one already is. */
-    fun startSend(taskId: String): Boolean = sending.add(taskId)
+    fun startSend(taskId: String): Boolean {
+        var added = false
+        _sending.update {
+            added = taskId !in it
+            it + taskId
+        }
+        return added
+    }
 
-    /** The send is over; [failure] is a refusal nobody was there to read. */
+    /**
+     * The send is over; [failure] is a refusal the page that sent it was not
+     * there to read. A page on that task now takes it ([outcomes]); else it
+     * waits for the next visit ([takeFailure]).
+     */
     fun endSend(taskId: String, failure: Friendly?) {
-        sending.remove(taskId)
-        if (failure != null) failures[taskId] = failure
+        _sending.update { it - taskId }
+        if (failure != null) {
+            failures[taskId] = failure
+            _outcomes.tryEmit(CommentOutcome(taskId, body = null, failure = failure))
+        }
     }
 
     /** The hub took [body]: the box forgets it, unless it holds other words by now. */
     fun sent(taskId: String, body: String) {
         if (texts[taskId]?.trim() == body) texts.remove(taskId)
+        _outcomes.tryEmit(CommentOutcome(taskId, body = body, failure = null))
     }
 
     /** A refusal kept for the next visit, once. */
     fun takeFailure(taskId: String): Friendly? = failures.remove(taskId)
 }
+
+/** How a comment's send ended: the hub took [body], or refused with [failure]. */
+data class CommentOutcome(val taskId: String, val body: String?, val failure: Friendly?)

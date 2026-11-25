@@ -494,9 +494,11 @@ private fun LazyListScope.orbitUsage(report: UsageReport, handlers: UsageHandler
     item(key = "total") {
         val o = Fleet.colors
         Column(modifier = Modifier.padding(horizontal = gutter(), vertical = 6.dp)) {
-            Text(formatUsd(report.total.costMicros), color = o.fg, fontSize = 30.sp, lineHeight = 36.sp, fontWeight = FontWeight.SemiBold)
+            val head = usageHeadline(report)
+            Text(formatUsd(head.costMicros), color = o.fg, fontSize = 30.sp, lineHeight = 36.sp, fontWeight = FontWeight.SemiBold)
+            Text(head.label, color = o.fgMuted, fontSize = 14.sp, lineHeight = 20.sp)
             Text(
-                "${compactCount(report.total.tokens)} tokens · ${compactCount(report.total.outputTokens)} out",
+                "${compactCount(head.tokens)} tokens · ${compactCount(head.outputTokens)} out",
                 color = o.fgMuted,
                 fontSize = 14.sp,
                 lineHeight = 20.sp,
@@ -504,7 +506,8 @@ private fun LazyListScope.orbitUsage(report: UsageReport, handlers: UsageHandler
         }
     }
     if (report.byHost.isNotEmpty()) {
-        item(key = "by-host") { GroupHeading("By host", null) }
+        // These two lists are the hub's `live_rows` figures: each session's whole cost.
+        item(key = "by-host") { GroupHeading("Sessions active in this time, by host (whole cost)", null) }
         val top = report.byHost.values.maxOf { it.costMicros }.coerceAtLeast(1)
         items(report.byHost.entries.sortedByDescending { it.value.costMicros }.map { it.key to it.value }, key = { "host:${it.first}" }) { (host, t) ->
             SpendBar(host, formatUsd(t.costMicros), t.costMicros.toFloat() / top)
@@ -521,7 +524,7 @@ private fun LazyListScope.orbitUsage(report: UsageReport, handlers: UsageHandler
     }
     if (report.sessions.isNotEmpty()) {
         item(key = "by-session") {
-            GroupHeading(if (report.sessionsTruncated) "Costliest sessions" else "By session", null)
+            GroupHeading(if (report.sessionsTruncated) "Costliest sessions (whole cost)" else "By session (whole cost)", null)
         }
         items(report.sessions, key = { "session:${it.sessionId}" }) { s ->
             PhoneRow(

@@ -17,6 +17,7 @@ import dev.claudefleet.mobile.model.Ticket
 import dev.claudefleet.mobile.model.TrackerRow
 import dev.claudefleet.mobile.net.EventStream
 import dev.claudefleet.mobile.net.HubCapabilities
+import dev.claudefleet.mobile.store.Credentials
 import dev.claudefleet.mobile.net.HubClient
 import dev.claudefleet.mobile.net.HubError
 import dev.claudefleet.mobile.net.HubEvent
@@ -131,6 +132,18 @@ class FleetRepository(
     private val onRevoked: suspend () -> Unit = {},
     /** This device's clock, in unix seconds. Injectable so the skew is testable. */
     private val clock: () -> Long = { epochSeconds() },
+    /**
+     * The hub's effective settings (`get_settings`), read on every connection
+     * and again on each `settings:changed` frame: the notifier's matrix and
+     * quiet hours follow a change made on another device while the phone is
+     * in a pocket, with no screen composed (reviews w11-4, w13-1).
+     */
+    private val onFleetSettings: (Map<String, String>) -> Unit = {},
+    /**
+     * The device mode this connection's `tools/list` shows ([listedMode]): an
+     * operator may change it after pairing, and no frame says so (review w18-2).
+     */
+    private val onMode: suspend (String) -> Unit = {},
 ) : FleetState {
     // Starts empty rather than from a cache: see the "no cold-start cache"
     // deviation in the design appendix — the app's one persistence seam is
@@ -197,8 +210,19 @@ class FleetRepository(
     private val _access = MutableStateFlow(MyAccess.UNKNOWN)
     override val access: StateFlow<MyAccess> = _access.asStateFlow()
 
+    // False from each `ready` until that connection has read `my_grants` (or
+    // learned there is none to read): see [FleetState.accessSettled].
+    private val _accessSettled = MutableStateFlow(false)
+    override val accessSettled: StateFlow<Boolean> = _accessSettled.asStateFlow()
+
     private val _hubContract = MutableStateFlow<Int?>(null)
     override val hubContract: StateFlow<Int?> = _hubContract.asStateFlow()
+
+    // Lossy and buffered like `_sessionChanges`: hints to re-read, never the fact.
+    private val _settingsChanges = MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    override val settingsChanges: Flow<Unit> = _settingsChanges.asSharedFlow()
+    private val _routineRunChanges = MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    override val routineRunChanges: Flow<Unit> = _routineRunChanges.asSharedFlow()
 
     // Buffered and lossy for the reason `_sessionChanges` is: a timeline
     // entry is news for whichever screen is waiting on one, and emitting must
@@ -260,6 +284,7 @@ class FleetRepository(
         discovery?.cancel()
         myWorkRead?.cancel()
         usageRead?.cancel()
+        settingsRead?.cancel()
         _status.value = ConnectionStatus.Offline(STOPPED)
     }
 
@@ -435,8 +460,16 @@ class FleetRepository(
     /** The connection just closed was ended by a `lagged` frame (see [follow]). */
     private var lagged = false
 
-    /** `lagged` endings in a row; reset by any other ending. */
+    /**
+     * `lagged` endings in a row; reset by any other ending, and by a
+     * connection that lived [LAG_STREAK_FORGET_SECONDS] past its `ready`:
+     * two lags hours apart are not a phone that keeps falling behind
+     * (review w18-4).
+     */
     private var lagStreak = 0
+
+    /** When this connection's `ready` was applied ([clock]); null before it. */
+    private var readyAt: Long? = null
 
     private suspend fun follow() {
         var failures = 0
@@ -462,6 +495,7 @@ class FleetRepository(
                 // than inheriting the last one's refusal.
                 var contractRefused = false
                 lagged = false
+                readyAt = null
                 events.connect(lastEventId).collect { event ->
                     if (contractRefused) return@collect
                     when (event) {
@@ -518,6 +552,18 @@ class FleetRepository(
                             // the old path.
                             if (event.resumed != true) relist()
                             failures = 0
+                            readyAt = clock()
+                            // A wake left over from before this connection is
+                            // spent here, not before the next wait: one sent
+                            // while an attempt was in flight (Retry, signal
+                            // back) is a real request, and used to be thrown
+                            // away when that attempt failed (review w18-5).
+                            wake.tryReceive()
+                            // A `lagged` reconnect leaves `status` Connected,
+                            // so no screen sees a transition to re-read on.
+                            val wasConnected = _status.value is ConnectionStatus.Connected
+                            // This connection has not read `my_grants` yet.
+                            _accessSettled.value = false
                             // Re-measured per connection, so a device whose
                             // clock is corrected by NTP heals on the next
                             // reconnect rather than staying wrong until a
@@ -529,6 +575,19 @@ class FleetRepository(
                             FleetLog.info("stream", "connected to the hub (${event.version})")
                             _sessionChanges.tryEmit(ALL_SESSIONS_CHANGED)
                             _downloadChanges.tryEmit(ALL_DOWNLOADS_CHANGED)
+                            // The hole a lag reports is where `work:*`,
+                            // `confirm:changed` and `handoff:changed` frames
+                            // were lost, and the hub replays none to a device:
+                            // the work screens re-read (review w18-4). An
+                            // ordinary reconnect has its status transition.
+                            if (wasConnected) {
+                                _workChanges.tryEmit(++workTicks)
+                                _confirmChanges.tryEmit(Unit)
+                                _handoffChanges.tryEmit(Unit)
+                                _updateDecisions.tryEmit(Unit)
+                            }
+                            _settingsChanges.tryEmit(Unit)
+                            _routineRunChanges.tryEmit(Unit)
                             discover()
                         }
                         is HubEvent.Lagged -> {
@@ -559,6 +618,11 @@ class FleetRepository(
                             if (event.isUpdateDecisionFrame()) _updateDecisions.tryEmit(Unit)
                             if (event.isConfirmFrame()) _confirmChanges.tryEmit(Unit)
                             if (event.isHandoffFrame()) _handoffChanges.tryEmit(Unit)
+                            if (event.isSettingsFrame()) {
+                                readFleetSettingsSoon()
+                                _settingsChanges.tryEmit(Unit)
+                            }
+                            if (event.isRoutineRunFrame()) _routineRunChanges.tryEmit(Unit)
                             event.downloadId()?.let { _downloadChanges.tryEmit(it) }
                             event.startProgress()?.let { _startProgress.tryEmit(it) }
                             event.repairProgress()?.let { _repairProgress.tryEmit(it) }
@@ -597,6 +661,7 @@ class FleetRepository(
             // second of status frames (a dialog going up) nobody applies.
             // Once or twice: a phone that keeps falling behind gets the
             // ordinary backoff, not a reconnect loop.
+            if (lagged && readyAt?.let { clock() - it >= LAG_STREAK_FORGET_SECONDS } == true) lagStreak = 0
             if (lagged && ++lagStreak <= LAG_RECONNECTS_WITHOUT_BACKOFF) {
                 lagged = false
                 continue
@@ -606,9 +671,9 @@ class FleetRepository(
             failures += 1
             _status.value = ConnectionStatus.Reconnecting(failures + 1, reason, details)
             FleetLog.warn("stream", "reconnecting, attempt ${failures + 1}: ${details ?: reason ?: "the stream ended"}")
-            // A wake left over from while the stream was up is not a request
-            // to skip this wait.
-            wake.tryReceive()
+            // A wake sent while the attempt above was in flight ends this
+            // wait at once; one from before the stream came up was spent at
+            // its `ready` (review w18-5).
             if (withTimeoutOrNull(backoff(failures)) { wake.receive() } != null) {
                 failures = 0
                 _status.value = ConnectionStatus.Reconnecting(1, reason, details)
@@ -631,8 +696,23 @@ class FleetRepository(
     private fun discover() {
         discovery?.cancel()
         discovery = scope.launch {
+            catalogAnswered = false
             val caps = readCapabilities()
             _capabilities.value = caps
+            // Only from a list the hub answered just now, and only from a hub
+            // known to list per mode: a failed read says nothing about it.
+            if (catalogAnswered && (_hubContract.value ?: 0) >= MODE_LISTED_CONTRACT) {
+                listedMode(caps.tools)?.let { mode ->
+                    try {
+                        onMode(mode)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Throwable) {
+                        // A store that will not write keeps the mode it has.
+                    }
+                }
+            }
+            if (HubCapabilities.GET_SETTINGS in caps.tools) readFleetSettingsSoon()
             myWorkRead?.cancel()
             // Three independent reads, side by side rather than one after
             // another: on a resume they are round trips before the account
@@ -643,7 +723,25 @@ class FleetRepository(
             coroutineScope {
                 launch { _orgs.value = readOrgs(caps) }
                 launch { _accountNames.value = readAccountNames(caps) }
-                launch { _access.value = readGrants(caps) }
+                launch {
+                    // Settled on an answer, or on a catalog the hub answered
+                    // that lists no `my_grants`. A read that fails is tried
+                    // again before the notifier is let look with whatever
+                    // was known: a hub that keeps failing must still alert
+                    // (review r5-08-4).
+                    for (wait in GRANTS_RETRY_MS) {
+                        if (wait > 0) delay(wait)
+                        if (!caps.myGrants) {
+                            if (catalogAnswered) _access.value = MyAccess.UNKNOWN
+                            break
+                        }
+                        val read = readGrantsOrNull() ?: continue
+                        _access.value = read
+                        break
+                    }
+                    // Read, or nothing to read: the notifier may look now (reviews w11-5, w05-1).
+                    _accessSettled.value = true
+                }
             }
             if (!caps.work) _trackers.value = emptyList()
             _myWork.value = if (caps.work) readMyWork() else null
@@ -664,7 +762,7 @@ class FleetRepository(
         for (wait in CATALOG_RETRY_MS) {
             if (wait > 0) delay(wait)
             try {
-                return HubCapabilities.of(client.toolCatalog())
+                return HubCapabilities.of(client.toolCatalog()).also { catalogAnswered = true }
             } catch (e: CancellationException) {
                 throw e
             } catch (t: Throwable) {
@@ -673,6 +771,28 @@ class FleetRepository(
             }
         }
         return if (last != null && _capabilities.value.tools.isNotEmpty()) _capabilities.value else HubCapabilities()
+    }
+
+    /** [readCapabilities]'s last answer came from the hub, not from a failure's fallback. */
+    private var catalogAnswered = false
+
+    /** A `get_settings` read in flight; a newer `settings:changed` replaces it. */
+    private var settingsRead: Job? = null
+
+    private fun readFleetSettingsSoon() {
+        settingsRead?.cancel()
+        settingsRead = scope.launch {
+            delay(SIGNAL_COALESCE_MS)
+            val values = try {
+                client.settingValues()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Throwable) {
+                // Keep what the last read found: a blip is not "no matrix".
+                return@launch
+            }
+            onFleetSettings(values)
+        }
     }
 
     /** A *My work* read in flight from [refresh]; a newer read replaces it. */
@@ -725,6 +845,15 @@ class FleetRepository(
      * forgetting a watch grant on a blip would light up a Send the hub will
      * refuse.
      */
+    /** One `my_grants` read; null when it did not answer. */
+    private suspend fun readGrantsOrNull(): MyAccess? = try {
+        MyAccess.of(client.myGrants())
+    } catch (e: CancellationException) {
+        throw e
+    } catch (_: Throwable) {
+        null
+    }
+
     private suspend fun readGrants(caps: HubCapabilities): MyAccess {
         if (!caps.myGrants) return MyAccess.UNKNOWN
         return try {
@@ -913,6 +1042,33 @@ internal fun isTransientHubFailure(t: Throwable): Boolean =
 internal fun reconnectDelay(failures: Int): Duration {
     val doublings = (failures - 1).coerceIn(0, 5)
     return minOf(BASE_RECONNECT_DELAY * (1 shl doublings), MAX_RECONNECT_DELAY)
+}
+
+/** The waits before each `my_grants` try of a connection: at once, then 1 s, then 4 s. */
+internal val GRANTS_RETRY_MS: List<Long> = listOf(0L, 1_000L, 4_000L)
+
+/** How long a connection lives past its `ready` before an earlier `lagged` ending is forgotten. */
+internal const val LAG_STREAK_FORGET_SECONDS: Long = 60
+
+/**
+ * The hub contract from which [listedMode] is trusted: a hub that lists
+ * `tools/list` per device mode (`mode_allows_tool`). An older one is left
+ * with the mode pairing stored.
+ */
+internal const val MODE_LISTED_CONTRACT: Int = 15
+
+/**
+ * The device mode a `tools/list` answer shows (review w18-2): the hub lists a
+ * tool only to a mode that may call it, so `new_session` or `queue_prompt`
+ * means `full`, `send_prompt` without them `answer` (it takes only a dialog
+ * key from such a device), and neither `readonly`. Null for an empty list,
+ * which says nothing.
+ */
+internal fun listedMode(tools: Set<String>): String? = when {
+    tools.isEmpty() -> null
+    HubCapabilities.NEW_SESSION in tools || HubCapabilities.QUEUE_PROMPT in tools -> Credentials.FULL
+    HubCapabilities.SEND_PROMPT in tools -> Credentials.ANSWER
+    else -> Credentials.READONLY
 }
 
 /** How many `lagged` endings in a row reconnect at once, before the ordinary backoff applies. */

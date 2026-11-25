@@ -22,7 +22,8 @@ import kotlinx.serialization.json.put
  * report or an exception message hands the fleet to whoever reads it.
  *
  * [hub] is the base URL with no trailing slash; [name] is the client name the
- * operator chose at `fleet-hub pair --name …`; [mode] is `full` or `readonly`.
+ * operator chose at `fleet-hub pair --name …`; [mode] is `full`, `answer` or
+ * `readonly`.
  */
 class Credentials(
     val hub: String,
@@ -50,9 +51,27 @@ class Credentials(
     /** True when this client may send prompts rather than only read. */
     val canWrite: Boolean get() = grantsWrite(mode)
 
+    /**
+     * True when this client may answer what a session asks: a dialog key
+     * through `send_prompt` and a form through `ask`. Wider than [canWrite]
+     * by the hub's "answer only" mode (review w18-1).
+     */
+    val canAnswer: Boolean get() = grantsAnswer(mode)
+
     companion object {
         const val READONLY: String = "readonly"
         const val FULL: String = "full"
+
+        /** `TokenMode::Answer`: what readonly may call, plus answering (`ANSWER_TOOLS` in `mcp/guard.rs`). */
+        const val ANSWER: String = "answer"
+
+        /**
+         * Whether a mode may answer a dialog or a form, as the hub decides
+         * it: `full` and `answer`, and nothing else. An answer-only device
+         * types no prompt and makes no other write; those stay on
+         * [grantsWrite].
+         */
+        fun grantsAnswer(mode: String): Boolean = mode == FULL || mode == ANSWER
 
         /**
          * Whether a mode string grants write, decided **exactly as the hub

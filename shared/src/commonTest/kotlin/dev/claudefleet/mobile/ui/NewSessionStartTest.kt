@@ -577,6 +577,30 @@ class NewSessionStartTest {
         assertEquals("team", assertNotNull(vm.state.value.account).profile)
     }
 
+    /** w06-5: the hub's refusal counts the org the HOST is filed under, for a project in no org too. */
+    @Test
+    fun an_account_kept_off_the_hosts_org_is_never_the_default() = runTest {
+        val actions = StartActions()
+        actions.headroomAnswer = Headroom(
+            pauseAtPct = 90.0,
+            chosen = HostLogin(profile = null, accountUuid = "acc-1", usedPct = 10.0),
+            logins = listOf(
+                HostLogin(profile = null, accountUuid = "acc-1", usedPct = 10.0),
+                HostLogin(profile = "team", accountUuid = "acc-2", usedPct = 60.0),
+            ),
+        )
+        val fleet = StartFleet().apply {
+            accountBlocks.value = listOf(AccountRow("acc-1", forbiddenOrgIds = listOf(9))).associate { it.uuid to it.blocks() }
+            orgs.value = OrgDirectory(orgs = mapOf(9L to OrgInfo(9, "Client")), hostOrg = mapOf("pine" to 9L))
+        }
+        val vm = vm(fleet, actions, backgroundScope)
+        vm.selectProject(3)
+        runCurrent()
+        assertEquals("pine", vm.state.value.host)
+        assertEquals("team", assertNotNull(vm.state.value.account).profile)
+        assertTrue(assertNotNull(vm.state.value.logins.firstOrNull { it.profile == null }).forbidden)
+    }
+
     /** Every login on the host is on a forbidden account: nothing the hub would take, so Create waits. */
     @Test
     fun a_host_with_only_forbidden_logins_cannot_start_the_project() = runTest {

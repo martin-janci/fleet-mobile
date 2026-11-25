@@ -22,7 +22,7 @@ data class SettingsUiState(
     val hub: String = "",
     /** The name the operator chose at `fleet-hub pair --name …`. */
     val clientName: String = "",
-    /** `full` or `readonly`. */
+    /** `full`, `answer` or `readonly`. */
     val mode: String = "",
     /** This app's version — the phone's, from its own build. */
     val appVersion: String = "",
@@ -51,6 +51,17 @@ data class SettingsUiState(
      * ought to have exposed.
      */
     val readOnly: Boolean get() = !Credentials.grantsWrite(mode)
+
+    /** The hub's "answer only" mode: [readOnly] for prompts, yet it answers questions (review w18-1). */
+    val answerOnly: Boolean get() = readOnly && Credentials.grantsAnswer(mode)
+
+    /** What this device may do, in the words Settings shows. */
+    val accessLine: String
+        get() = when {
+            answerOnly -> "Answer only, this device answers questions but sends no prompts"
+            readOnly -> "Read only, this device cannot send prompts"
+            else -> "Full access"
+        }
 
     /** Nothing to forget once there is no credential, and not twice at once. */
     val canForget: Boolean get() = !forgetting && hub.isNotBlank()

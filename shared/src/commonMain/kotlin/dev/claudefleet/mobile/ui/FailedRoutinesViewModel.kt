@@ -7,7 +7,13 @@ import dev.claudefleet.mobile.net.HubError
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.merge
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.minutes
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -46,6 +52,16 @@ class FailedRoutinesViewModel(
         }
     }
 
+    /**
+     * Read again on each of [changes] (a routine's run moved) and every
+     * [every] meanwhile: the rows and their share of the badge follow a
+     * failure, a retry that passed and a routine turned off (review w05-7).
+     * Runs until cancelled.
+     */
+    suspend fun follow(changes: Flow<Unit>, every: Duration = 15.minutes) {
+        merge(changes, flow { while (true) { delay(every); emit(Unit) } }).collect { refresh().join() }
+    }
+
     private companion object {
         const val FAILING = "failing"
     }
@@ -53,4 +69,4 @@ class FailedRoutinesViewModel(
 
 /** The Inbox's Failed routine rows: the ones this person may change, newest failure first. */
 fun failedRoutineRows(failing: List<FailingRoutine>): List<FailingRoutine> =
-    failing.filter { it.mayChange }.sortedByDescending { it.run.startedAt }
+    failing.filter { it.actsHere }.sortedByDescending { it.run.startedAt }

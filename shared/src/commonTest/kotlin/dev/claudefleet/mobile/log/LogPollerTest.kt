@@ -157,4 +157,18 @@ class LogPollerTest {
         val refusing = HubClient(HttpClient(MockEngine { respond("", HttpStatusCode.Unauthorized) }), "https://fleet.example.com", "tok-phone")
         assertEquals(401, refusing.postLog("{}").first)
     }
+
+    /** Review w18-6: a stop is one pairing's answer; another hub, or this one paired again, is asked afresh. */
+    @Test
+    fun a_stop_holds_for_the_pairing_that_said_it_and_no_longer() = runTest {
+        val hub = FakeLogHub(404 to "", 204 to "")
+        var pairing: Any? = "https://old.example.com" to "tok-a"
+        val p = LogPoller(ringWithAnHour(), "fleet-mobile 1.2.3", post = hub::post, clock = { NOW }, pairing = { pairing })
+        assertEquals(LogPoll.Stop, p.pollOnce())
+        assertEquals(LogPoll.Stop, p.pollOnce())
+        assertEquals(1, hub.bodies.size, "the hub that said stop is not asked again")
+        pairing = "https://new.example.com" to "tok-b"
+        assertEquals(LogPoll.Idle, p.pollOnce(), "another pairing is asked")
+        assertEquals(2, hub.bodies.size)
+    }
 }

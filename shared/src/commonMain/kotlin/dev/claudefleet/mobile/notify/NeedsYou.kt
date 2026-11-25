@@ -45,6 +45,12 @@ data class NeedsYouAlert(
      * Open log. Whether this device may write is the app's check, on arrival.
      */
     val retryable: Boolean = false,
+    /**
+     * The notification's first line when the alert is about a fact, not one
+     * session ("pine is down", review w11-2); null for a session's own alert,
+     * which reads "<session> needs you".
+     */
+    val headline: String? = null,
 ) : NeedsYouEvent
 
 /** A session that needed you no longer does — answered here or elsewhere: its notification goes. */
@@ -66,22 +72,48 @@ fun needsYouAlerts(
     /** Who this person is and what is shared with them: a session they only watch is its owner's to answer (review w08-3). */
     access: MyAccess = MyAccess.UNKNOWN,
 ): Pair<List<NeedsYouAlert>, Map<Long, String?>> {
-    val mine = rows.filter { answersHere(access.levelFor(it)) }
-    val now = rows.associate { it.id to if (answersHere(access.levelFor(it))) it.notifyKey else null }
-    val alerts = mine.mapNotNull { row ->
-        val reason = row.notifyReason ?: return@mapNotNull null
-        val key = row.notifyKey
+    val now = HashMap<Long, String?>(rows.size)
+    val alerts = mutableListOf<NeedsYouAlert>()
+    // Rows a fact about a host or a login newly blocks, by cause, and the
+    // causes some row was already blocked by at the last look.
+    val blocked = LinkedHashMap<String, MutableList<SessionRow>>()
+    val known = HashSet<String>()
+    for (row in rows) {
+        // Someone else's to answer (watched, or seen through team reach): not
+        // counted, not announced (reviews w08-3, w11-1).
+        if (!access.waitsOnMe(row) || !answersHere(access.levelFor(row), row)) {
+            now[row.id] = null
+            continue
+        }
+        val reason = row.notifyReason
         val before = seen[row.id]
-        if (before == key) return@mapNotNull null
-        val sameReason = before != null && reasonOf(before) == reason
+        if (reason != null && reason in FACT_REASONS) {
+            // The row's own key rides along under the fact, so that when the
+            // block lifts an old Failed or Done is not news again (review w11-3).
+            now[row.id] = factKey(reason, ownKey(before))
+            val cause = "$reason@${if (reason == "host_down") row.hostAlias else row.accountUuid ?: row.hostAlias}"
+            if (factOf(before) == reason) known += cause else blocked.getOrPut(cause) { mutableListOf() } += row
+            continue
+        }
+        val key = row.notifyKey
+        now[row.id] = key
+        if (reason == null) continue
+        val own = ownKey(before)
+        // A block just lifted and the row is where it was before it: not
+        // news (review w11-3), but the fact's alert was posted in this
+        // session's own notification, which would go on saying the host is
+        // down. Drawn again as the session's, without a sound (review r5-08-2).
+        val lifted = factOf(before) != null && own == key
+        if (own == key && !lifted) continue
+        val sameReason = own != null && reasonOf(own) == reason
         // Same reason, and before knew no question: the dialog's question
         // arrived after the status (the hub reads the pane a moment after
         // the hook). The notification is updated, not announced again.
         // Same reason with a DIFFERENT question is a new question: a session
         // that asks again while still waiting is news, and used to be silent.
-        val quiet = sameReason && questionOf(before) == null
-        if (sameReason && questionOf(key) == null) return@mapNotNull null
-        NeedsYouAlert(
+        val quiet = lifted || (sameReason && questionOf(own) == null)
+        if (!lifted && sameReason && questionOf(key) == null) continue
+        alerts += NeedsYouAlert(
             row.id,
             row.displayName,
             "${reasonWords(reason)} · ${row.hostAlias}",
@@ -89,10 +121,54 @@ fun needsYouAlerts(
             reason,
             question = row.pendingInput?.question?.trim()?.takeIf { it.isNotEmpty() },
             quiet = quiet,
-            retryable = reason == "failed" && inboxRowActions(row, canWrite = true, switchAvailable = false, limit = null).retryPrompt != null,
+            retryable = reason == "failed" && inboxRowActions(row, canWrite = true, switchAvailable = false, limit = null, level = access.levelFor(row)).retryPrompt != null,
         )
     }
+    // A host down or a login at its limit is one fact: said once, however
+    // many sessions it blocks, and not again for a session that joins a
+    // cause already said (review w11-2).
+    for ((cause, hit) in blocked) {
+        if (cause in known) continue
+        val first = hit.minBy { it.id }
+        val reason = cause.substringBefore('@')
+        alerts += if (hit.size == 1) {
+            NeedsYouAlert(first.id, first.displayName, "${reasonWords(reason)} · ${first.hostAlias}", first.supportingLine, reason)
+        } else {
+            NeedsYouAlert(
+                first.id,
+                first.hostAlias,
+                "${hit.size} sessions are blocked",
+                reason = reason,
+                headline = when (reason) {
+                    "host_down" -> "${first.hostAlias} is down"
+                    "account_limit" -> "An account is at its limit"
+                    else -> "A login on ${first.hostAlias} is signed out"
+                },
+            )
+        }
+    }
     return alerts to now
+}
+
+/**
+ * The attention reasons that are a fact about a host or a login, not about
+ * one session: every session there carries it at once, and it lifts for all
+ * of them at once.
+ */
+internal val FACT_REASONS: Set<String> = setOf("host_down", "account_limit", "no_credentials")
+
+/** What is remembered for a row a fact blocks: the fact, and the row's [own] key from before it. */
+private fun factKey(reason: String, own: String?): String = "$reason|${own.orEmpty()}"
+
+/** The fact a remembered [key] names, or null. A bare fact reason is one too (remembered before review w11-3). */
+private fun factOf(key: String?): String? = key?.substringBefore('|')?.substringBefore('#')?.takeIf { it in FACT_REASONS }
+
+/** The row's own key under a remembered [key]: what it was before a fact blocked it. */
+private fun ownKey(key: String?): String? = when {
+    key == null -> null
+    '|' in key -> key.substringAfter('|').ifEmpty { null }
+    factOf(key) != null -> null
+    else -> key
 }
 
 /**
@@ -112,17 +188,24 @@ private fun questionOf(key: String?): String? = key?.substringAfter('#', "")?.if
 
 /**
  * What a session is announced for: the hub's attention reason, else
- * [DONE_REASON] for one that finished its task (`completed`, the hub's word
- * for a background agent done) — never for one running outside fleet, never
- * for Jev's proposal ([SessionRow.isProposed], contract 15), and never for a
- * routine's run that finished ([SessionRow.isRoutineRun]: the routine's news,
- * read in its runs; its failures and questions still announce), and never
- * for a lost, ghost or pending-kill row (`lifecycle`: nobody can answer it,
- * review w04-2), as the desktop does.
+ * [DONE_REASON] for one whose turn ended unread, as the desktop's
+ * `isDoneUnread` has it (review w11-8), or whose task finished (`completed`,
+ * the hub's word for a background agent done) — never for one running
+ * outside fleet, never for Jev's proposal ([SessionRow.isProposed], contract
+ * 15), and never for a routine's run that finished ([SessionRow.isRoutineRun]:
+ * the routine's news, read in its runs; its failures and questions still
+ * announce), and never for a lost, ghost or pending-kill row (`lifecycle`:
+ * nobody can answer it, review w04-2), as the desktop does.
  */
 internal val SessionRow.notifyReason: String?
     get() = attentionReason?.takeIf { needsAttention }
-        ?: DONE_REASON.takeIf { claudeStatus == "completed" && kind != "external" && !isRoutineRun }
+        ?: DONE_REASON.takeIf {
+            attentionReason == null && isLive && kind != "external" && !isRoutineRun && !isProposed &&
+                (claudeStatus == "completed" || (claudeStatus in DONE_UNREAD_STATUSES && isUnread))
+        }
+
+/** The resting statuses a turn's end leaves a session in: Done once it is unread. */
+private val DONE_UNREAD_STATUSES: Set<String> = setOf("idle", "stopped")
 
 /** The hub's attention reason as the notification says it — the app's one table, [reasonLabel]. */
 fun reasonWords(reason: String): String = reasonLabel(reason)
@@ -145,9 +228,14 @@ fun needsYouEvents(
 ): Flow<NeedsYouEvent> = flow {
     var seen: Map<Long, String?>? = remembered
     var persisted: Map<Long, String?>? = null
-    combine(fleet.sessions, fleet.status, fleet.access) { rows, status, access -> Triple(rows, status, access) }
-        .filter { (_, status, _) -> status is ConnectionStatus.Connected }
-        .collect { (rows, _, access) ->
+    // Held until this connection has read who the person is: before that
+    // every row reads as theirs, and a watched session would ring and then
+    // be taken down, at every start of the watcher (reviews w11-5, w05-1).
+    combine(fleet.sessions, fleet.status, fleet.access, fleet.accessSettled) { rows, status, access, settled ->
+        Triple(rows, access, status is ConnectionStatus.Connected && settled)
+    }
+        .filter { (_, _, ready) -> ready }
+        .collect { (rows, access, _) ->
             val before = seen
             val (alerts, after) = needsYouAlerts(before.orEmpty(), rows, access)
             seen = after

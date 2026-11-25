@@ -379,6 +379,8 @@ fun PairedScreen(
     onContinue: () -> Unit,
     modifier: Modifier = Modifier,
     notifier: BackgroundNotifier = NoBackgroundNotifier,
+    /** The hub's own address, when it did not answer from here and the typed one was kept (review r5-08-5). */
+    unreached: String? = null,
 ) {
     val o = Fleet.colors
     val gutter = OrbitTokens.spacing("phone-gutter").dp
@@ -415,6 +417,16 @@ fun PairedScreen(
                 color = o.fgMuted,
                 textAlign = TextAlign.Center,
             )
+            if (unreached != null) {
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    text = "The hub's own address, ${hubLabel(unreached)}, did not answer from this network, so this phone keeps " +
+                        "${hubLabel(paired.hub)}. It reaches the hub only where that address does; pair again from where the hub's own one answers to change it.",
+                    style = Fleet.type.textSm,
+                    color = o.statusWaiting,
+                    textAlign = TextAlign.Center,
+                )
+            }
             if (offer) {
                 Spacer(Modifier.height(28.dp))
                 Surface(

@@ -702,6 +702,9 @@ class HubClientTest {
         assertEquals("1800003600", seen[1]["not_before"]?.jsonPrimitive?.content)
         assertEquals("true", seen[1]["until_limit_reset"]?.jsonPrimitive?.content)
         assertEquals("true", seen[1]["skip_if_archived"]?.jsonPrimitive?.content)
+        // Review w09-3: the id the hub dedupes a retry by (contract 18), only when one is given.
+        client.queuePrompt(7, "status?", clientMsgId = "sp-abc")
+        assertEquals("sp-abc", seen[2]["client_msg_id"]?.jsonPrimitive?.content)
     }
 
     /** Tune prompt: the draft, the ask and the earlier prompts go to `session_prompt_tune`; an empty ask and history stay off the wire. */

@@ -228,6 +228,28 @@ interface FleetState {
     val access: StateFlow<MyAccess> get() = NoWork.access
 
     /**
+     * Whether the current connection has read [access] (or learned the hub
+     * has no `my_grants`). False between a `ready` and that read: the
+     * notifier holds its look meanwhile, because [MyAccess.UNKNOWN] reads
+     * every row as this person's and a watched session would ring, then be
+     * taken down a second later (reviews w11-5, w05-1). True for a fake.
+     */
+    val accessSettled: StateFlow<Boolean> get() = NoWork.settled
+
+    /**
+     * A hint that the hub's settings may have moved: each `settings:changed`
+     * frame, and each `ready` (what changed while away was never streamed).
+     * The fleet's settings pages read again (review w13-1).
+     */
+    val settingsChanges: Flow<Unit> get() = emptyFlow()
+
+    /**
+     * A hint that a routine's run moved (`run:changed`), and each `ready`:
+     * the Inbox's Failed routines read again (review w05-7).
+     */
+    val routineRunChanges: Flow<Unit> get() = emptyFlow()
+
+    /**
      * The wire-contract revision the hub's last trusted `ready` named, or
      * null before one and from a hub that names none. Gates what only a
      * newer contract carries, such as the Answer share level (revision 13).
@@ -268,6 +290,7 @@ private object NoWork {
     val trackers: StateFlow<List<TrackerRow>> = MutableStateFlow<List<TrackerRow>>(emptyList()).asStateFlow()
     val access: StateFlow<MyAccess> = MutableStateFlow(MyAccess.UNKNOWN).asStateFlow()
     val hubContract: StateFlow<Int?> = MutableStateFlow<Int?>(null).asStateFlow()
+    val settled: StateFlow<Boolean> = MutableStateFlow(true).asStateFlow()
 }
 
 /** What [FleetState.downloadChanges] carries for "re-read everything". Download ids start at 1. */

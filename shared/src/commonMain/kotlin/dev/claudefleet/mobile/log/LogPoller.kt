@@ -56,19 +56,30 @@ class LogPoller(
     /** This device's token, masked by value in every upload as well as by shape. */
     private val secret: () -> String? = { null },
     private val clock: () -> Long = ::epochMillis,
+    /**
+     * What names the pairing the app holds now (its hub and credential). A
+     * stop is that pairing's answer: another hub, or this one paired again,
+     * is asked afresh (review w18-6).
+     */
+    private val pairing: () -> Any? = { null },
 ) {
-    /** The hub said stop ([LogPoll.Stop]); nothing more is posted this run. */
+    /** The pairing that said stop, boxed so "none" and a null pairing differ. */
     @Volatile
-    var stopped: Boolean = false
-        private set
+    private var stoppedFor: List<Any?>? = null
+
+    /** The hub said stop ([LogPoll.Stop]) to this pairing; nothing more is posted to it this run. */
+    val stopped: Boolean
+        get() = stoppedFor?.let { it[0] == pairing() } ?: false
 
     suspend fun pollOnce(): LogPoll {
         if (stopped) return LogPoll.Stop
+        // The pairing asked, not whichever is held when the answer lands.
+        val asked = pairing()
         val (status, reply) = postOrNull("{}") ?: return LogPoll.Retry
         when (status) {
             204 -> return LogPoll.Idle
             200 -> Unit
-            in STOP -> return stop()
+            in STOP -> return stop(asked)
             else -> return LogPoll.Retry
         }
         val want = wantOf(reply) ?: return LogPoll.Retry
@@ -76,7 +87,7 @@ class LogPoller(
         val (sent, _) = postOrNull(upload.body) ?: return LogPoll.Retry
         return when (sent) {
             in 200..299 -> LogPoll.Sent(upload.lines)
-            in STOP -> stop()
+            in STOP -> stop(asked)
             else -> LogPoll.Retry
         }
     }
@@ -97,8 +108,8 @@ class LogPoller(
         }
     }
 
-    private fun stop(): LogPoll {
-        stopped = true
+    private fun stop(asked: Any?): LogPoll {
+        stoppedFor = listOf(asked)
         return LogPoll.Stop
     }
 

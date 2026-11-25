@@ -143,6 +143,62 @@ class ProjectToolsViewModelTest {
         assertEquals(emptyList(), vm.state.value.worktrees?.worktrees)
     }
 
+    /** Review w17-3: project A's list answering after project B was picked is not shown under B. */
+    @Test
+    fun an_earlier_projects_worktrees_that_answer_last_are_dropped() = runTest {
+        val base = Projects()
+        val slow = CompletableDeferred<Unit>()
+        val actions = object : ProjectActions by base {
+            override suspend fun worktrees(hostAlias: String, projectId: Long): HostWorktrees {
+                if (projectId == 1L) slow.await()
+                return HostWorktrees(hostAlias = hostAlias, projectId = projectId, cloned = true, worktrees = listOf(WorktreeRow(id = projectId * 10, name = "w")))
+            }
+        }
+        val vm = ProjectToolsViewModel(ProjFleet(ALL_PROJ), actions, backgroundScope, canWrite = true)
+        vm.loadWorktrees("pine", 1)
+        runCurrent()
+        vm.loadWorktrees("pine", 2).join()
+        slow.complete(Unit)
+        runCurrent()
+        assertEquals(2L, vm.state.value.worktrees?.projectId)
+        assertEquals(listOf(20L), vm.state.value.worktrees?.worktrees?.map { it.id })
+    }
+
+    /** r5-09-6: a delete that returns after another project was picked does not reload the first one's list over it. */
+    @Test
+    fun a_delete_that_ends_after_another_project_was_picked_leaves_its_list_alone() = runTest {
+        val base = Projects()
+        val slow = CompletableDeferred<Unit>()
+        val asked = mutableListOf<Long>()
+        val actions = object : ProjectActions by base {
+            override suspend fun worktrees(hostAlias: String, projectId: Long): HostWorktrees {
+                asked += projectId
+                return HostWorktrees(hostAlias = hostAlias, projectId = projectId, cloned = true, worktrees = listOf(WorktreeRow(id = projectId * 10, name = "w")))
+            }
+            override suspend fun deleteWorktree(worktreeId: Long) = slow.await()
+        }
+        val vm = ProjectToolsViewModel(ProjFleet(ALL_PROJ), actions, backgroundScope, canWrite = true)
+        vm.loadWorktrees("pine", 1).join()
+        runCurrent()
+        vm.deleteWorktree(10)
+        runCurrent()
+        vm.loadWorktrees("pine", 2).join()
+        slow.complete(Unit)
+        runCurrent()
+        assertEquals(listOf(1L, 2L), asked)
+        assertEquals(2L, vm.state.value.worktrees?.projectId)
+    }
+
+    /** Review w17-4: a picked worktree the list no longer has is dropped; an unread list decides nothing. */
+    @Test
+    fun a_picked_worktree_that_left_the_list_is_gone() {
+        val list = HostWorktrees(hostAlias = "pine", projectId = 1, worktrees = listOf(WorktreeRow(id = 7, name = "x")))
+        assertFalse(worktreeGone(7, list))
+        assertTrue(worktreeGone(8, list))
+        assertFalse(worktreeGone(8, null))
+        assertFalse(worktreeGone(null, list))
+    }
+
     @Test
     fun a_readonly_pairing_reads_worktrees_but_adds_and_deletes_nothing() = runTest {
         val actions = Projects()

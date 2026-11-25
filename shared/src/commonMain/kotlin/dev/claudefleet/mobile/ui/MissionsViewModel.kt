@@ -91,13 +91,15 @@ class MissionsViewModel(
         val loading: Boolean = false,
         val missions: List<Mission> = emptyList(),
         val detail: MissionDetail? = null,
-        val busy: String? = null,
         /**
-         * The mission [busy]'s press is on; null for Pause all. The press
-         * shows (spinner, buttons held) only on its own mission's detail, so
-         * leaving it while it runs does not hold another one (review w16-1).
+         * The press in flight on each mission, by mission id. A press shows
+         * (spinner, buttons held) only on its own mission's detail, so
+         * leaving it while it runs does not hold another one (review w16-1),
+         * and coming back finds it still held (review w05-5).
          */
-        val busyFor: Long? = null,
+        val busyBy: Map<Long, String> = emptyMap(),
+        /** Pause all is in flight: it holds every mission. */
+        val pausingAll: Boolean = false,
         val results: List<StepResult>? = null,
         val notice: String? = null,
         val error: Friendly? = null,
@@ -130,7 +132,11 @@ class MissionsViewModel(
             loading = l.loading,
             missions = l.missions,
             detail = l.detail,
-            busy = l.busy.takeIf { l.busyFor == null || l.detail == null || l.detail.mission.id == l.busyFor },
+            busy = when {
+                l.pausingAll -> "pause_all"
+                l.detail != null -> l.busyBy[l.detail.mission.id]
+                else -> l.busyBy.values.firstOrNull()
+            },
             results = l.results,
             notice = l.notice,
             error = l.error,
@@ -158,7 +164,7 @@ class MissionsViewModel(
         // Quiet: the person did nothing, so a failed re-read raises no banner.
         scope.launch {
             fleet.workChanges.throttleLatest(WORK_REREAD_MS).collect {
-                if (local.value.loaded && local.value.busy == null && state.value.available) read(quiet = true)
+                if (local.value.loaded && !local.value.pressing && state.value.available) read(quiet = true)
             }
         }
     }
@@ -293,13 +299,13 @@ class MissionsViewModel(
 
     /** Pause every mission this person may change, and end their grants. */
     fun pauseAll(): Job = scope.launch {
-        if (!state.value.canPauseAll || local.value.busy != null) return@launch
-        local.update { it.copy(busy = "pause_all", error = null, results = null) }
+        if (!state.value.canPauseAll || local.value.pressing) return@launch
+        local.update { it.copy(pausingAll = true, error = null, results = null) }
         try {
             val paused = actions.pauseAll()
             local.update {
                 it.copy(
-                    busy = null,
+                    pausingAll = false,
                     notice = when (paused.size) {
                         0 -> "Nothing was running."
                         1 -> "Paused 1 mission."
@@ -311,7 +317,7 @@ class MissionsViewModel(
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
-            local.update { it.copy(busy = null, error = friendly(t)) }
+            local.update { it.copy(pausingAll = false, error = friendly(t)) }
         }
     }
 
@@ -326,29 +332,53 @@ class MissionsViewModel(
         }
     }
 
-    /** [id]'s press is over: its busy goes, unless another mission's press took the slot since. */
-    private fun Local.done(id: Long): Local = if (busyFor == id) copy(busy = null, busyFor = null) else this
+    /** [id]'s press is over. */
+    private fun Local.done(id: Long): Local = copy(busyBy = busyBy - id)
+
+    /** Any press in flight, on any mission. */
+    private val Local.pressing: Boolean get() = pausingAll || busyBy.isNotEmpty()
+
+    /**
+     * End [id]'s press. [Local.pick] moves (dropping a read that started
+     * under the press) only while the person is still where they pressed:
+     * moved on, the bump would throw away the read of the mission they opened
+     * meanwhile and leave its spinner on (review w05-4). True when still there.
+     */
+    private fun endPress(id: Long, mine: Long, failure: Friendly? = null): Boolean {
+        var here = false
+        local.update {
+            here = it.pick == mine
+            val l = it.done(id)
+            // A failure is about the mission pressed: shown only if it is still the one on screen.
+            if (here) l.copy(pick = l.pick + 1, error = failure ?: l.error) else l
+        }
+        return here
+    }
 
     /** One press on the open mission, then a fresh read of it — whatever it changed is the hub's to say. */
     private fun act(busy: String, call: suspend Press.(Long) -> Unit): Job = scope.launch {
         val id = local.value.detail?.mission?.id ?: return@launch
         // One press per mission at a time, and none under Pause all; a press
         // on another mission may go while this one runs (review w16-1).
-        if (local.value.busy != null && (local.value.busyFor == null || local.value.busyFor == id)) return@launch
-        val mine = local.updateAndGet { it.copy(busy = busy, busyFor = id, error = null, results = null, notice = null, pick = it.pick + 1) }.pick
-        val after = try {
+        if (local.value.pausingAll || id in local.value.busyBy) return@launch
+        val mine = local.updateAndGet { it.copy(busyBy = it.busyBy + (id to busy), error = null, results = null, notice = null, pick = it.pick + 1) }.pick
+        val here = try {
             Press(mine).call(id)
-            local.updateAndGet { it.done(id).copy(pick = it.pick + 1) }.pick
+            endPress(id, mine)
         } catch (e: CancellationException) {
             local.update { it.done(id) }
             throw e
         } catch (t: Throwable) {
-            // A failure is about the mission pressed: shown only if it is still the one on screen.
-            local.updateAndGet { it.done(id).copy(error = if (it.pick == mine) friendly(t) else it.error, pick = it.pick + 1) }.pick
+            endPress(id, mine, friendly(t))
         }
         // The person went Back, picked another mission or closed the sheet
         // while the press ran: its read would pull them back into this one.
-        if (after != mine + 1) return@launch
+        // Back on the same mission by another road (left and reopened): its
+        // read ran under the press, so it is read again, quietly (r5-09-7).
+        if (!here) {
+            if (local.value.detail?.mission?.id == id) readOne(id, quiet = true)
+            return@launch
+        }
         readOne(id)
     }
 

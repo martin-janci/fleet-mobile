@@ -964,7 +964,7 @@ fun SessionScreen(
                     draft = liveDraft,
                     values = draftAnswers,
                     onChange = { name, v -> draftAnswers = if (v == null) draftAnswers - name else draftAnswers + (name to v) },
-                    canAnswer = chatForms != null && !state.readOnly && state.connected,
+                    canAnswer = chatForms != null && state.mayPressKeys && state.connected,
                     modifier = Modifier.heightIn(max = cardMax),
                 )
             }
@@ -974,7 +974,7 @@ fun SessionScreen(
                     pending = formShown,
                     sessionName = state.session?.displayName ?: "The session",
                     actions = chatForms,
-                    canAnswer = !state.readOnly && state.connected,
+                    canAnswer = state.mayPressKeys && state.connected,
                     open = state.session?.pendingForm != null,
                     onDismiss = { closedForm = null },
                     modifier = Modifier.heightIn(max = cardMax),
@@ -1849,6 +1849,7 @@ private fun SessionOverflowMenu(
                     archive = orbit.onArchive != null,
                     kill = manage && state.canKill,
                     pinned = session?.isPinned == true,
+                    cleanUp = mayCleanUp(session),
                     pin = state.canPin,
                     worktree = onRepo != null,
                     sendLater = state.canSendLater,
@@ -1982,11 +1983,13 @@ private fun SessionOverflowMenu(
                 if (state.canPin) {
                     DropdownMenuItem(text = { Text("Pin") }, enabled = actionable, onClick = { expanded = false; onSetPinned(true) })
                 }
-                DropdownMenuItem(
-                    text = { Text("Clean up…") },
-                    enabled = actionable,
-                    onClick = { expanded = false; showSafeKillConfirm = true },
-                )
+                if (mayCleanUp(state.session)) {
+                    DropdownMenuItem(
+                        text = { Text("Clean up…") },
+                        enabled = actionable,
+                        onClick = { expanded = false; showSafeKillConfirm = true },
+                    )
+                }
             }
             if (state.canKill) {
                 DropdownMenuItem(
@@ -2136,7 +2139,7 @@ private fun ManageDialogs(
     if (showRestartConfirm) {
         ConfirmSheet(
             title = "Restart this session?",
-            body = "This kills and recreates the tmux session in place — for a wedged REPL.",
+            body = restartConfirmBody(state.session?.claudeStatus == "working"),
             confirm = "Restart",
             onConfirm = { hideRestartConfirm(); onRestart() },
             onDismiss = hideRestartConfirm,

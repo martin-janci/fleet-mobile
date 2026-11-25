@@ -295,7 +295,7 @@ internal fun fleetNotifyLine(f: FleetSettingsUiState): String? {
 }
 
 private fun accessWords(s: SettingsUiState): String =
-    if (s.readOnly) "Read only, this device cannot send prompts" else "Full access"
+    s.accessLine
 
 @Composable
 private fun ColumnScope.ThisPhone(input: OrbitSettingsInput, handlers: OrbitSettingsHandlers, notifier: BackgroundNotifier) {
@@ -415,7 +415,14 @@ private fun ColumnScope.SettingsGroupPage(group: SettingsGroup, input: OrbitSett
         SettingsGroup.GENERAL -> {
             KeyValue("Hub", s.hub)
             KeyValue("Client name", s.clientName)
-            KeyValue("Access", if (s.readOnly) "read only — this device cannot send prompts" else s.mode)
+            KeyValue(
+                "Access",
+                when {
+                    s.answerOnly -> "answer only — this device answers questions but sends no prompts"
+                    s.readOnly -> "read only — this device cannot send prompts"
+                    else -> s.mode
+                },
+            )
             // Two programs, two versions, named apart.
             KeyValue("App version", s.appVersion)
             KeyValue("Hub version", s.hubVersion)

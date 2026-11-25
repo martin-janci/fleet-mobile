@@ -95,7 +95,8 @@ fun filesLine(files: Int, transfer: Transfer?): String {
 }
 
 /** More's header line (MobileSettings): "fleet.example.com · full access". */
-fun moreSubtitle(hub: String, canWrite: Boolean): String = "$hub · ${if (canWrite) "full access" else "read-only"}"
+fun moreSubtitle(hub: String, canWrite: Boolean, canAnswer: Boolean = canWrite): String =
+    "$hub · ${if (canWrite) "full access" else if (canAnswer) "answer only" else "read-only"}"
 
 /** More's footer (MobileNav): both versions, and whether every host answers. */
 fun moreFooter(appVersion: String, hubVersion: String?, hosts: List<HostRow>, connected: Boolean): String {

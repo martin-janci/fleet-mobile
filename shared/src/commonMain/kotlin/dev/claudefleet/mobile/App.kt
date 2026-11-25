@@ -295,6 +295,7 @@ import dev.claudefleet.mobile.ui.NewSessionWizard
 import dev.claudefleet.mobile.ui.NewSessionExtras
 import dev.claudefleet.mobile.ui.DiscardSheet
 import dev.claudefleet.mobile.ui.newSessionTyped
+import dev.claudefleet.mobile.ui.worktreeGone
 import dev.claudefleet.mobile.ui.NewSessionViewModel
 import dev.claudefleet.mobile.ui.WizardStep
 import dev.claudefleet.mobile.ui.PairScreen
@@ -655,8 +656,8 @@ class AppContainer(
      * exists: a cold start from `adb shell am start -d …` delivers the URL in
      * `onCreate`, well before Compose has built a `PairViewModel`. Holding it
      * here means the screen picks it up whenever it appears, and a link that
-     * arrives while the app is already paired simply sits unread — which is the
-     * right outcome, since pairing again is not something a link may decide.
+     * arrives while the app is already paired is dropped there (review w18-7) —
+     * pairing again is not something a link may decide.
      */
     private val _pairLink = MutableStateFlow<String?>(null)
     val pairLink: StateFlow<String?> = _pairLink.asStateFlow()
@@ -783,13 +784,14 @@ class AppContainer(
     /**
      * This app's log, sent to the hub only when its self debug agent asks
      * (`POST /log`); held per process, so a hub that said stop is not asked
-     * again this run.
+     * again this run, while this pairing lasts.
      */
     val logPoller: LogPoller = LogPoller(
         ring = FleetLog.ring,
         app = "fleet-mobile $appVersion",
         post = { body -> session.withClient { it.postLog(body) } },
         secret = { session.credentials()?.token },
+        pairing = { session.credentials()?.let { it.hub to it.token } },
     )
 
     /**
@@ -845,6 +847,7 @@ class AppContainer(
         drafts.forHub(credentials.hub)
         noteDrafts.forHub(credentials.hub)
         planSettled.forHub(credentials.hub)
+        taskCommentDrafts.forHub(credentials.hub)
         return FleetRepository(
             client = HubClient(http, credentials.hub, credentials.token),
             events = HubEventStream(http, credentials.hub, credentials.token),
@@ -859,6 +862,11 @@ class AppContainer(
             // background watcher's, a moment behind a re-pair) must not
             // delete the new one.
             onRevoked = { session.revoke(refused = credentials) },
+            // The notifier's matrix and quiet hours, kept for the watcher
+            // whether or not a screen is up (reviews w11-4, w13-1).
+            onFleetSettings = { prefs.writeFleetNotify(it) },
+            // An operator changed this device's mode since it paired (review w18-2).
+            onMode = { mode -> session.modeListed(mode, held = credentials) },
         )
     }
 }
@@ -981,9 +989,14 @@ fun App(container: AppContainer) {
                         }
                     }
                     is AuthState.Paired -> {
+                        // A pair link opened while paired cannot be used now,
+                        // and must not wait for the next time the Pair screen
+                        // appears (a revoke, Forget this hub): it would fill
+                        // in someone else's hub there (review w18-7).
+                        LaunchedEffect(Unit) { container.pairLink.collect { if (it != null) container.consumePairLink() } }
                         val paired = justPaired
                         if (paired != null) {
-                            PairedScreen(paired, onContinue = { justPaired = null }, notifier = container.notifier)
+                            PairedScreen(paired, onContinue = { justPaired = null }, notifier = container.notifier, unreached = container.session.unreachedEcho)
                         } else {
                             FleetRoute(container, state.credentials, fleetCheck = fleetCheck, onFleetCheckDone = { fleetCheck = false })
                             // This phone's lock (redesign 14.11): over the fleet
@@ -1147,7 +1160,7 @@ private fun ControlTab(
             ControlForms(
                 rows = remember(controlRows, controlState.sessionId) { controlForms(controlRows, controlState.sessionId) },
                 actions = container.chatFormActions,
-                canAnswer = credentials.canWrite && controlStatus is ConnectionStatus.Connected,
+                canAnswer = credentials.canAnswer && controlStatus is ConnectionStatus.Connected,
                 onOpenSession = nav::open,
             )
         }
@@ -1209,7 +1222,7 @@ private fun ControlTab(
     }
     val (escalationCards, escalationsOutside) = remember(controlRows, controlAccess, controlState.sessionId, laterKeys, settingsCaps.ask, controlHosts, escalationScope, fleetWide) {
         val later = laterKeys.toSet()
-        val answerable = controlRows.filter { controlAccess.levelFor(it) == null }
+        val answerable = controlRows.filter { controlAccess.mineOrUnclaimed(it) }
         val all = escalations(answerable, controlState.sessionId, later, formsShown = settingsCaps.ask)
         val ours = if (escalationScope == null) all else escalations(answerable, controlState.sessionId, later, formsShown = settingsCaps.ask, scope = escalationScope)
         // A signed-out login is a card even with no session on it yet (review M3), after the sessions' own cards, whatever the scope.
@@ -1388,11 +1401,15 @@ private fun FleetRoute(
 
     // The Orbit Fleet bar (redesign 14.2), the only one since the 14.13
     // sign-off. A `ui.layout` an older version stored is cleared by AppContainer.
-    val nav = remember(credentials) { Navigator() }
+    // Keyed on the pairing, not the whole credential: a mode the hub changed
+    // (written back from `tools/list`) must not drop the person to the root
+    // tab (review r5-08-6). The repository and the view models stay keyed on
+    // the credential, so the new mode reaches them.
+    val nav = remember(credentials.hub, credentials.token) { Navigator() }
     val screen by nav.screen.collectAsState()
     val tab by nav.tab.collectAsState()
     // The first import after a pair (14.12): set as the fleet check ends, on the New bar only.
-    var importing by remember(credentials) { mutableStateOf(false) }
+    var importing by remember(credentials.hub, credentials.token) { mutableStateOf(false) }
 
     // `Navigator.back()` returns false on a tab specifically so the
     // platform can have the gesture instead, `NavigatorTest` pins that, and a
@@ -1464,6 +1481,7 @@ private fun FleetRoute(
             accountName = { uuid -> repository.accountNames.value[uuid] },
             signedOut = { alias, profile -> repository.hosts.value.firstOrNull { it.alias == alias }?.isSignedOut(profile) == true },
             forbidden = { projectId, orgId -> repository.forbiddenAccountsIn(projectId, orgId) },
+            level = { repository.access.value.levelFor(it) },
         )
     }
     // A row that leaves Needs you takes its notice and Switch proposal with it (review w17-5).
@@ -1481,6 +1499,14 @@ private fun FleetRoute(
     val failedRoutinesServed = repository.capabilities.collectAsState().value.has(HubCapabilities.ROUTINES, "failing")
     LaunchedEffect(failedRoutinesVm, reviewAsksLive, failedRoutinesServed) {
         if (reviewAsksLive && failedRoutinesServed) failedRoutinesVm.refresh()
+        // And as runs move (`run:changed`, each connection) and on a slow
+        // tick, as the desktop re-reads (review w05-7).
+        if (reviewAsksLive && failedRoutinesServed) failedRoutinesVm.follow(repository.routineRunChanges)
+    }
+    // Turned off or paused in the Automation sheet a Failed row opened: no
+    // run moved, so the row is read again when the sheet closes.
+    LaunchedEffect(failedRoutinesVm, automationState.open) {
+        if (!automationState.open && reviewAsksLive && failedRoutinesServed) failedRoutinesVm.refresh()
     }
     val debugDevices = remember(repository, scope) { DebugDevicesViewModel(repository, container.deviceActions, scope, credentials.canWrite) }
     val debugDevicesState by debugDevices.state.collectAsState()
@@ -1604,7 +1630,7 @@ private fun FleetRoute(
     val workState by myWork.state.collectAsState()
     // A task or a session opened from a mission's detail: the screen under
     // the sheet, and the mission to put back up when back returns there.
-    var missionUnder by remember(credentials) { mutableStateOf<Pair<Screen, Long>?>(null) }
+    var missionUnder by remember(credentials.hub, credentials.token) { mutableStateOf<Pair<Screen, Long>?>(null) }
     LaunchedEffect(screen) {
         val (under, id) = missionUnder ?: return@LaunchedEffect
         when (missionReturn(screen, under)) {
@@ -1667,7 +1693,7 @@ private fun FleetRoute(
     val help by helpSettings.state.collectAsState()
     val practice = remember(container) { PracticeFleet() }
     val practiceState by practice.state.collectAsState()
-    val tourAnchors = remember(credentials) { TourAnchors() }
+    val tourAnchors = remember(credentials.hub, credentials.token) { TourAnchors() }
     // A lesson step only says where to look: going there is the one thing it does.
     val lessonPlace = help.lesson?.let { (lesson, step) -> lesson.steps.getOrNull(step)?.place }
     LaunchedEffect(lessonPlace) {
@@ -1695,7 +1721,14 @@ private fun FleetRoute(
     // The Company entry shows once the hub has listed an org to this device.
     val orgDirectory by repository.orgs.collectAsState()
     LaunchedEffect(settingsCaps) { fleetSettings.setHistoryAvailable(settingsCaps.settingHistory) }
-    LaunchedEffect(settingsCaps.fleetSettings) { if (settingsCaps.fleetSettings) fleetSettings.load() }
+    // On every connection and each `settings:changed`, not once per
+    // composition: a change made on another device shows here (review w13-1).
+    LaunchedEffect(repository, fleetSettings, settingsCaps.fleetSettings) {
+        if (settingsCaps.fleetSettings) {
+            fleetSettings.load()
+            repository.settingsChanges.collect { fleetSettings.load() }
+        }
+    }
 
     // Every HubBanner's Retry wakes the reconnect loop, not only its screen's refresh (review r13).
     val reconnect: () -> Unit = remember(repository) { { repository.reconnectNow() } }
@@ -2201,6 +2234,7 @@ private fun FleetRoute(
                                 credentials.canWrite,
                                 inboxCaps.switchAccount,
                                 row.accountUuid?.let(inboxList.accountUsage::get)?.limitAt(inboxList.nowSeconds, row.launchModel),
+                                access.levelFor(row),
                             )
                         },
                         rowHandlers = InboxRowHandlers(
@@ -2285,7 +2319,7 @@ private fun FleetRoute(
                         PauseAllQuestion(onPause = { askPauseAll = false; automation.setPaused(true) }, onDismiss = { askPauseAll = false })
                     }
                     MoreScreen(
-                        subtitle = moreSubtitle(hubLabel(credentials.hub), credentials.canWrite),
+                        subtitle = moreSubtitle(hubLabel(credentials.hub), credentials.canWrite, credentials.canAnswer),
                         footer = moreFooter(container.appVersion, moreHubVersion, hostRows, moreStatus is ConnectionStatus.Connected),
                         top = { updateState.available?.let { UpdateCard(it, container.appVersion, onOpen = nav::openUpdate) } },
                         entries = buildList {
@@ -2904,9 +2938,16 @@ private fun NewSessionRoute(
     var askDiscard by remember { mutableStateOf(false) }
     BackHandler(enabled = wizardStep.previous == null && !state.creating && newSessionTyped(state)) { askDiscard = true }
     val leave: () -> Unit = { if (!state.creating && newSessionTyped(state)) askDiscard = true else onBack() }
+    // "A ticket" leaves the form as Cancel does: the same question first (review w17-8).
+    var askDiscardForTicket by remember { mutableStateOf(false) }
+    val toTicket: (() -> Unit)? = onFromTicket?.let { go -> { if (!state.creating && newSessionTyped(state)) askDiscardForTicket = true else go() } }
     val tools = remember(repository, scope) { ProjectToolsViewModel(repository, container.projectActions, scope, credentials.canWrite) }
     val toolsState by tools.state.collectAsState()
     LaunchedEffect(tools, state.host, state.projectId) { tools.loadWorktrees(state.host, state.projectId) }
+    // A picked worktree that is no longer in the list (deleted here or elsewhere) is not sent (review w17-4).
+    LaunchedEffect(toolsState.worktrees, state.worktreeId) {
+        if (worktreeGone(state.worktreeId, toolsState.worktrees)) vm.selectWorktree(null)
+    }
     // Add a project resumes on the person's other device where the hub keeps wizards.
     val addDraftsListed = repository.capabilities.collectAsState().value.wizardState
     // Add a project's own steps (redesign 14.20), over the wizard: back on
@@ -2970,7 +3011,7 @@ private fun NewSessionRoute(
             onTyped = { addTyped = it },
             drafts = container.wizardDrafts.takeIf { addDraftsListed },
         ),
-        onFromTicket = onFromTicket,
+        onFromTicket = toTicket,
         extras = NewSessionExtras(
             onStartFrom = vm::setStartFrom,
             onFirstMessage = vm::onFirstMessageChange,
@@ -2984,6 +3025,9 @@ private fun NewSessionRoute(
     )
     if (askDiscard) {
         DiscardSheet(onKeep = { askDiscard = false }, onDiscard = { askDiscard = false; onBack() })
+    }
+    if (askDiscardForTicket) {
+        DiscardSheet(onKeep = { askDiscardForTicket = false }, onDiscard = { askDiscardForTicket = false; onFromTicket?.invoke() })
     }
     if (askDiscardAdd) {
         DiscardSheet(onKeep = { askDiscardAdd = false }, onDiscard = { askDiscardAdd = false; addTyped = false; tools.closeAdd() })
@@ -3244,6 +3288,8 @@ private fun SessionRoute(
             // readonly credential disables the box rather than making a call it
             // knows would be refused.
             canSendPrompts = credentials.canWrite,
+            // An answer-only device presses a dialog's keys and answers a form (review w18-1).
+            canPressKeys = credentials.canAnswer,
             // The container's one instance, not a fresh one per session — see
             // `AppContainer.quickReplies`.
             quickReplies = container.quickReplies,

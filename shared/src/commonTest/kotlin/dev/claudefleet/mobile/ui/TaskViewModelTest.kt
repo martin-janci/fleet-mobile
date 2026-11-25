@@ -947,14 +947,68 @@ class TaskViewModelTest {
         runCurrent()
         assertEquals("ship it", second.state.value.commentDraft, "the box is as it was left")
         assertNull(second.comment(), "the first send is still on the wire")
+        assertTrue(second.state.value.busy, "and the page on screen shows it")
 
         actions.failWrite = HubError.Tool("E_FORBIDDEN", "tracker post refused")
         gate.complete(Unit)
         runCurrent()
+        // Review w05-6: the page the person is on hears the refusal now.
+        assertNotNull(second.state.value.error, "the refusal is said on the visit the person is on")
+        assertFalse(second.state.value.busy)
+        assertEquals("ship it", second.state.value.commentDraft)
         val third = taskVm(actions = actions, commentDrafts = drafts)
         runCurrent()
         assertEquals("ship it", third.state.value.commentDraft)
-        assertNotNull(third.state.value.error, "the refusal nobody saw is said on return")
+        assertNull(third.state.value.error, "said once")
+        assertEquals(1, actions.calls.count { it.startsWith("comment ") })
+    }
+
+    /** With nobody on the task when the refusal lands, it waits for the next visit. */
+    @Test
+    fun a_comment_refused_with_nobody_there_is_said_on_return() = runTest {
+        val drafts = TaskCommentDrafts()
+        val gate = CompletableDeferred<Unit>()
+        val actions = FakeWorkActions().apply { taskAnswer = local; writeGate = { gate.await() } }
+        val screen = CoroutineScope(backgroundScope.coroutineContext + Job(backgroundScope.coroutineContext[Job]))
+        val first = taskVm(actions = actions, scope = screen, callScope = backgroundScope, commentDrafts = drafts)
+        runCurrent()
+        first.setCommentDraft("ship it")
+        first.comment()
+        runCurrent()
+        screen.cancel()
+        actions.failWrite = HubError.Tool("E_FORBIDDEN", "tracker post refused")
+        gate.complete(Unit)
+        runCurrent()
+
+        val back = taskVm(actions = actions, commentDrafts = drafts)
+        runCurrent()
+        assertNotNull(back.state.value.error)
+        assertEquals("ship it", back.state.value.commentDraft)
+    }
+
+    /** Review w05-6: a send from the visit left that succeeds empties the box on screen, so it is not posted twice. */
+    @Test
+    fun a_comment_that_lands_after_the_person_came_back_leaves_the_box() = runTest {
+        val drafts = TaskCommentDrafts()
+        val gate = CompletableDeferred<Unit>()
+        val actions = FakeWorkActions().apply { taskAnswer = local; writeGate = { gate.await() } }
+        val screen = CoroutineScope(backgroundScope.coroutineContext + Job(backgroundScope.coroutineContext[Job]))
+        val first = taskVm(actions = actions, scope = screen, callScope = backgroundScope, commentDrafts = drafts)
+        runCurrent()
+        first.setCommentDraft("ship it")
+        first.comment()
+        runCurrent()
+        screen.cancel()
+
+        val second = taskVm(actions = actions, commentDrafts = drafts)
+        runCurrent()
+        assertEquals("ship it", second.state.value.commentDraft)
+        gate.complete(Unit)
+        runCurrent()
+
+        assertEquals("", second.state.value.commentDraft, "what was sent is out of the box")
+        assertFalse(second.state.value.busy)
+        assertNull(second.comment(), "nothing left to post a second time")
         assertEquals(1, actions.calls.count { it.startsWith("comment ") })
     }
 

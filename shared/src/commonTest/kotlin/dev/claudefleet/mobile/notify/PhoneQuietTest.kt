@@ -33,6 +33,10 @@ class PhoneQuietTest {
         prefs.writePhoneQuiet(PhoneQuiet(PhoneQuiet.NIGHT, needsYouThrough = true))
         assertTrue(prefs.notifyAllows("waiting", night))
         assertFalse(prefs.notifyAllows("failed", night))
+        // Blocked is not "waiting on you" (review w11-6): a host down or CI failing waits for the morning.
+        assertFalse(prefs.notifyAllows("host_down", night))
+        assertFalse(prefs.notifyAllows("ci_failing", night))
+        assertTrue(prefs.notifyAllows("host_down", noon))
     }
 
     @Test

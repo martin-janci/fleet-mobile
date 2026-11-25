@@ -188,13 +188,26 @@ private const val DAY_S = 86_400L
 
 /** The next local [hour]:[minute] after [now]: today's, or tomorrow's once today's has passed. */
 fun nextLocalClock(now: Long, utcOffset: (Long) -> Int, hour: Int, minute: Int): Long {
-    val today = localMidnight(now, utcOffset(now)) + hour * 3_600L + minute * 60L
-    return if (today > now) today else today + DAY_S
+    val today = atLocalOffset(localMidnight(now, utcOffset(now)) + hour * 3_600L + minute * 60L, now, utcOffset)
+    return if (today > now) today else atLocalOffset(localMidnight(now, utcOffset(now)) + DAY_S + hour * 3_600L + minute * 60L, now, utcOffset)
 }
 
 /** Tomorrow's local 09:00. */
 fun tomorrowMorning(now: Long, utcOffset: (Long) -> Int): Long =
-    localMidnight(now, utcOffset(now)) + DAY_S + 9 * 3_600L
+    atLocalOffset(localMidnight(now, utcOffset(now)) + DAY_S + 9 * 3_600L, now, utcOffset)
+
+/**
+ * [candidate] was counted from today's midnight at [now]'s UTC offset. Across
+ * a clock change the offset at the candidate differs, and the wall clock it
+ * names is that much off: corrected by the difference (once is enough for a
+ * one-hour change). A time inside the hour a spring change skips corrects
+ * back across the change: there the uncorrected instant stands (02:15 is
+ * 03:15 that night, as the desktop's `setHours` has it).
+ */
+private fun atLocalOffset(candidate: Long, now: Long, utcOffset: (Long) -> Int): Long {
+    val corrected = candidate - (utcOffset(candidate) - utcOffset(now))
+    return if (utcOffset(corrected) == utcOffset(candidate)) corrected else candidate
+}
 
 /**
  * What a choice sends: the time it holds the prompt until, or the limit
